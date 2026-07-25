@@ -1,0 +1,37 @@
+{
+  "name": "calculateur-aks-roi",
+  "version": "1.0.0",
+  "description": "Calculateur de coût et ROI pour migration vers Azure AKS",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@hookform/resolvers": "^3.3.2",
+    "@types/nodemailer": "^8.0.1",
+    "chart.js": "^4.4.0",
+    "lucide-react": "^0.294.0",
+    "mysql2": "^3.23.1",
+    "next": "^14.0.0",
+    "nodemailer": "^9.0.3",
+    "react": "^18.2.0",
+    "react-chartjs-2": "^5.2.0",
+    "react-dom": "^18.2.0",
+    "react-hook-form": "^7.49.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.25",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "autoprefixer": "^10.4.0",
+    "eslint": "^8.0.0",
+    "eslint-config-next": "^14.0.0",
+    "postcss": "^8.4.0",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.3.0"
+  }
+}

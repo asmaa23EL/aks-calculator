@@ -1,0 +1,7 @@
+{
+  "createdAt": "2026-07-24T10:41:17.618Z",
+  "table": "admin_users",
+  "createTable": "CREATE TABLE `admin_users` (\n  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,\n  `email` varchar(255) NOT NULL,\n  `password_hash` varchar(255) NOT NULL,\n  `is_active` tinyint(1) NOT NULL DEFAULT 1,\n  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),\n  PRIMARY KEY (`id`),\n  UNIQUE KEY `uniq_admin_users_email` (`email`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+  "rowCount": 0,
+  "rows": []
+}
