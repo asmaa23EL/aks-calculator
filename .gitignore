@@ -22,3 +22,4 @@ frontend/out/
 .DS_Store
 Thumbs.db
 .vscode/
+frontend/.git_frontend_backup_*/
