@@ -153,14 +153,14 @@ export async function ensureLeadSubmissionsSchema(): Promise<void> {
   if (!existingColumns.has('pdf_download_count')) {
     await mysqlPool.execute(`
       ALTER TABLE lead_submissions
-      ADD COLUMN pdf_download_count INT UNSIGNED NOT NULL DEFAULT 0
+      ADD COLUMN IF NOT EXISTS pdf_download_count INT UNSIGNED NOT NULL DEFAULT 0
       AFTER email_count
     `);
   }
   if (!existingColumns.has('last_pdf_download_at')) {
     await mysqlPool.execute(`
       ALTER TABLE lead_submissions
-      ADD COLUMN last_pdf_download_at DATETIME NULL
+      ADD COLUMN IF NOT EXISTS last_pdf_download_at DATETIME NULL
       AFTER pdf_download_count
     `);
   }

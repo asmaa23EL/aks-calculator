@@ -3,7 +3,7 @@ export function getApiBaseUrl(): string {
   if (fromEnv) {
     return fromEnv.replace(/\/$/, '');
   }
-  return '';
+  return 'http://localhost:4001';
 }
 
 export function buildApiUrl(path: string): string {

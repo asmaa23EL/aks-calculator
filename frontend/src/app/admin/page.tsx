@@ -7,10 +7,8 @@ import { buildApiUrl } from '@/utils/api';
 import {
   BarChart3,
   Download,
-  Globe,
   LayoutDashboard,
   Mail,
-  ShieldCheck,
   Users,
 } from 'lucide-react';
 
@@ -48,9 +46,11 @@ export default function AdminDashboardPage() {
         <div className="flex flex-col lg:flex-row min-h-[calc(100vh-2rem)]">
           <aside className="w-full lg:w-72 bg-gradient-to-b from-[#0f2f66] to-[#0d2551] text-white p-6 flex flex-col">
             <div className="flex items-center gap-3 pb-6 border-b border-white/20">
-              <div className="h-10 w-10 rounded-lg bg-white/15 flex items-center justify-center">
-                <ShieldCheck size={20} />
-              </div>
+              <img
+                src="/logo.png"
+                alt="CloudDev Fusion Logo"
+                className="h-10 w-auto"
+              />
               <div>
                 <p className="text-lg font-semibold leading-tight">CloudDevFusion</p>
                 <p className="text-[11px] text-blue-100">Excellence Azure & Cloud</p>
@@ -124,10 +124,6 @@ export default function AdminDashboardPage() {
 
           <main className="flex-1 bg-slate-50 overflow-auto">
             <div className="h-14 border-b border-slate-200 bg-white px-5 md:px-8 flex items-center justify-end gap-4">
-              <div className="hidden sm:flex items-center gap-2 text-xs text-[#2f65f5]">
-                <Globe size={12} />
-                <span>www.clouddevfusion.com</span>
-              </div>
               <div className="flex items-center gap-2 text-sm text-slate-700">
                 <div className="h-7 w-7 rounded-full bg-[#2f65f5] text-white flex items-center justify-center text-xs font-semibold">A</div>
                 <span>Admin</span>

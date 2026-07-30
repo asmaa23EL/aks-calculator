@@ -749,8 +749,33 @@ async function sendLeadReportEmail({ lead, pdfBuffer }) {
   });
 }
 
+async function ensureDefaultAdminAccount() {
+  const adminEmail = String(process.env.ADMIN_EMAIL || 'admin@clouddevfusion.com').trim().toLowerCase();
+  const adminPassword = String(process.env.ADMIN_PASSWORD || 'admin123');
+
+  if (!adminEmail || !adminPassword) {
+    return;
+  }
+
+  const [existingRows] = await db.execute('SELECT Id_ADMIN, password_hash FROM admin WHERE email = ? LIMIT 1', [adminEmail]);
+  const existingAdmin = existingRows[0];
+
+  if (existingAdmin) {
+    if (!existingAdmin.password_hash) {
+      const passwordHash = await bcrypt.hash(adminPassword, 12);
+      await db.execute('UPDATE admin SET password_hash = ? WHERE Id_ADMIN = ?', [passwordHash, existingAdmin.Id_ADMIN]);
+    }
+    return;
+  }
+
+  const passwordHash = await bcrypt.hash(adminPassword, 12);
+  await db.execute(
+    `INSERT INTO admin (nom, email, password_hash, role, actif) VALUES (?, ?, ?, 'ADMIN', 1)`,
+    ['Administrateur', adminEmail, passwordHash]
+  );
+}
+
 async function ensureTables() {
-  // Choix A: on conserve uniquement le schema MCD principal.
   await db.execute(`
     CREATE TABLE IF NOT EXISTS admin (
       Id_ADMIN BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -765,6 +790,8 @@ async function ensureTables() {
       UNIQUE KEY uniq_admin_email (email)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
+
+  await ensureDefaultAdminAccount();
 }
 
 function asBoolean(value) {
@@ -879,6 +906,7 @@ app.post('/api/leads', async (req, res) => {
     let legacyMirror = null;
     let legacyMirrorError = null;
     try {
+      await ensureTables();
       legacyMirror = await mirrorLeadToLegacyTables({
         lead,
         answers,
@@ -890,6 +918,10 @@ app.post('/api/leads', async (req, res) => {
     } catch (legacyError) {
       console.error('Erreur sync tables legacy:', legacyError);
       legacyMirrorError = legacyError instanceof Error ? legacyError.message : 'Erreur inconnue';
+    }
+
+    if (legacyMirrorError) {
+      console.warn('Mirror legacy non bloquant:', legacyMirrorError);
     }
 
     const wantsPdfDownload = downloadPdf === true;

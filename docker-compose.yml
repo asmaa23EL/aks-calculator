@@ -1,0 +1,84 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: aks_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: calculator
+      MYSQL_USER: aks_user
+      MYSQL_PASSWORD: aks_password
+      MYSQL_ROOT_PASSWORD: root_password
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$$MYSQL_USER -p$$MYSQL_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: aks_backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DB_HOST: host.docker.internal
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: ""
+      DB_NAME: calculator
+      FRONTEND_ORIGIN: http://localhost:4000
+      ADMIN_SESSION_SECRET: changez_moi_secret_session_admin_long
+      ADMIN_EMAIL: admin@clouddevfusion.com
+      ADMIN_PASSWORD: admin123
+      SMTP_HOST: smtp.example.com
+      SMTP_PORT: 587
+      SMTP_USER: user@example.com
+      SMTP_PASS: mot_de_passe_smtp
+      SMTP_FROM_EMAIL: no-reply@example.com
+      SMTP_FROM_NAME: CloudDev Fusion
+    ports:
+      - "4001:3001"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:4001
+    container_name: aks_frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+      mysql:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:4001
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: aks_user
+      DB_PASSWORD: aks_password
+      DB_NAME: calculator
+      ADMIN_EMAIL: admin@clouddevfusion.com
+      ADMIN_PASSWORD: admin123
+      ADMIN_SESSION_SECRET: changez_moi_secret_session_admin_long
+      SMTP_HOST: smtp.example.com
+      SMTP_PORT: 587
+      SMTP_USER: user@example.com
+      SMTP_PASS: mot_de_passe_smtp
+      SMTP_FROM_EMAIL: no-reply@example.com
+      SMTP_FROM_NAME: CloudDev Fusion
+    ports:
+      - "4000:3000"
+
+volumes:
+  mysql_data:
