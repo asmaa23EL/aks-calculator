@@ -11,19 +11,15 @@ export default function SiteFooter() {
   }
 
   return (
-    <footer className="bg-gray-900 text-white mt-16">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div className="grid md:grid-cols-3 gap-8 mb-8">
+    <footer className="mt-16 bg-[linear-gradient(135deg,_#001F4D_0%,_#002B63_100%)] text-white">
+      <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
+        <div className="mb-8 grid gap-8 md:grid-cols-3">
           <div>
-            <div className="flex items-center gap-3 mb-4">
-              <img
-                src="/logo.png"
-                alt="CloudDev Fusion Logo"
-                className="h-8 w-auto"
-              />
+            <div className="mb-4 flex items-center gap-3">
+              <img src="/logo.png" alt="CloudDev Fusion" className="h-9 w-16 object-contain" />
               <h3 className="text-lg font-bold">CloudDev Fusion</h3>
             </div>
-            <p className="text-gray-400 text-sm">
+            <p className="text-sm text-blue-100">
               Experts en migration Cloud et Azure Kubernetes Service.
               Nous accompagnons les entreprises dans leur transformation digitale.
             </p>

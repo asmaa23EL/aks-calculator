@@ -1,5 +1,5 @@
 const path = require('path');
-const crypto = require('crypto');
+const { createAdminSessionToken, verifyAdminSessionToken } = require('./adminSession');
 require('dotenv').config({
   path: path.resolve(__dirname, '../.env'),
 });
@@ -18,7 +18,6 @@ const puppeteer = require('puppeteer');
 const app = express();
 const port = Number(process.env.PORT || 3001);
 const frontendOrigin = process.env.FRONTEND_ORIGIN || 'http://localhost:3000';
-const sessionSecret = process.env.ADMIN_SESSION_SECRET || '';
 
 const allowedOrigins = frontendOrigin
   .split(',')
@@ -34,8 +33,7 @@ function isAllowedOrigin(origin) {
     return true;
   }
 
-  // Autorise les ports locaux de dev (3000, 3001, 3002, 3003...).
-  return /^http:\/\/localhost:\d+$/.test(origin);
+  return /^(https?:\/\/)(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
 }
 
 app.use(
@@ -50,7 +48,7 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '2mb', strict: false }));
 
 const pool = mysql.createPool({
   host: process.env.DB_HOST || '127.0.0.1',
@@ -100,78 +98,6 @@ function parseCookies(req) {
   return Object.fromEntries(entries);
 }
 
-function base64UrlEncode(value) {
-  return Buffer.from(value, 'utf8')
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/g, '');
-}
-
-function base64UrlDecode(value) {
-  const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
-  const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
-  return Buffer.from(padded, 'base64').toString('utf8');
-}
-
-function signValue(value) {
-  return crypto.createHmac('sha256', sessionSecret).update(value).digest('base64url');
-}
-
-function createAdminSessionToken(payload) {
-  const encodedPayload = base64UrlEncode(JSON.stringify(payload));
-  const signature = signValue(encodedPayload);
-  return `${encodedPayload}.${signature}`;
-}
-
-function verifyAdminSessionToken(token) {
-  if (!sessionSecret) {
-    return null;
-  }
-
-  const parts = token.split('.');
-  if (parts.length !== 2) {
-    return null;
-  }
-
-  const [encodedPayload, givenSignature] = parts;
-  const expectedSignature = signValue(encodedPayload);
-
-  const given = Buffer.from(givenSignature);
-  const expected = Buffer.from(expectedSignature);
-  if (given.length !== expected.length) {
-    return null;
-  }
-
-  if (!crypto.timingSafeEqual(given, expected)) {
-    return null;
-  }
-
-  try {
-    const payload = JSON.parse(base64UrlDecode(encodedPayload));
-    if (!isRecord(payload)) {
-      return null;
-    }
-
-    if (
-      typeof payload.userId !== 'number' ||
-      typeof payload.email !== 'string' ||
-      payload.role !== 'admin' ||
-      typeof payload.exp !== 'number'
-    ) {
-      return null;
-    }
-
-    if (payload.exp < Math.floor(Date.now() / 1000)) {
-      return null;
-    }
-
-    return payload;
-  } catch {
-    return null;
-  }
-}
-
 function setAdminCookie(res, token) {
   const maxAgeSeconds = 60 * 60 * 12;
   const parts = [
@@ -182,18 +108,11 @@ function setAdminCookie(res, token) {
     `Max-Age=${maxAgeSeconds}`,
   ];
 
-  if (process.env.NODE_ENV === 'production') {
-    parts.push('Secure');
-  }
-
   res.setHeader('Set-Cookie', parts.join('; '));
 }
 
 function clearAdminCookie(res) {
   const parts = ['admin_session=', 'Path=/', 'HttpOnly', 'SameSite=Lax', 'Max-Age=0'];
-  if (process.env.NODE_ENV === 'production') {
-    parts.push('Secure');
-  }
   res.setHeader('Set-Cookie', parts.join('; '));
 }
 
@@ -256,6 +175,48 @@ function toTinyInt(value) {
   return value ? 1 : 0;
 }
 
+async function ensureLeadActivityTable() {
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS activite_lead (
+      Id_ACTIVITE BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      Id_LEAD BIGINT UNSIGNED NOT NULL,
+      Id_ADMIN BIGINT UNSIGNED NOT NULL,
+      type_activite VARCHAR(50) NOT NULL,
+      contenu TEXT NULL,
+      ancien_statut VARCHAR(50) NULL,
+      nouveau_statut VARCHAR(50) NULL,
+      date_activite DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      prochaine_action_at DATETIME NULL,
+      PRIMARY KEY (Id_ACTIVITE),
+      INDEX idx_activite_lead (Id_LEAD),
+      INDEX idx_activite_admin (Id_ADMIN),
+      INDEX idx_prochaine_action (prochaine_action_at),
+      CONSTRAINT fk_activite_lead FOREIGN KEY (Id_LEAD) REFERENCES lead(Id_LEAD) ON DELETE CASCADE,
+      CONSTRAINT fk_activite_admin FOREIGN KEY (Id_ADMIN) REFERENCES admin(Id_ADMIN) ON DELETE RESTRICT
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `);
+}
+
+async function recordLeadActivity({ leadId, adminId, type, content, oldStatus, newStatus, nextActionAt = null }) {
+  if (!leadId || !adminId) {
+    return;
+  }
+
+  try {
+    await ensureLeadActivityTable();
+    await db.execute(
+      `
+      INSERT INTO activite_lead (
+        Id_LEAD, Id_ADMIN, type_activite, contenu, ancien_statut, nouveau_statut, prochaine_action_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `,
+      [leadId, adminId, type, content ?? null, oldStatus ?? null, newStatus ?? null, nextActionAt]
+    );
+  } catch (error) {
+    console.warn('Impossible d enregistrer l activite du lead:', error);
+  }
+}
+
 async function mirrorLeadToLegacyTables({ lead, answers, resultats, submittedAt, emailSent, emailError }) {
   if (!hasWizardSections(answers) || !isRecord(resultats)) {
     return null;
@@ -283,6 +244,7 @@ async function mirrorLeadToLegacyTables({ lead, answers, resultats, submittedAt,
         consentement_rgpd = ?,
         date_soumission = ?,
         rapport_envoye = ?,
+        telephone = ?,
         source = ?
       WHERE Id_LEAD = ?
       `,
@@ -294,6 +256,7 @@ async function mirrorLeadToLegacyTables({ lead, answers, resultats, submittedAt,
         toTinyInt(Boolean(lead.consentementRGPD)),
         submittedAt,
         toTinyInt(Boolean(emailSent)),
+        String(lead.telephone || '').trim() || null,
         'SITE_WEB',
         legacyLeadId,
       ]
@@ -312,8 +275,9 @@ async function mirrorLeadToLegacyTables({ lead, answers, resultats, submittedAt,
         crm_id,
         date_soumission,
         rapport_envoye,
+        telephone,
         source
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         String(lead.nom || ''),
@@ -326,6 +290,7 @@ async function mirrorLeadToLegacyTables({ lead, answers, resultats, submittedAt,
         null,
         submittedAt,
         toTinyInt(Boolean(emailSent)),
+        String(lead.telephone || '').trim() || null,
         'SITE_WEB',
       ]
     );
@@ -608,8 +573,32 @@ function formatEuros(montant) {
   }).format(montant);
 }
 
+function buildLeadReportSummary(resultats) {
+  const economiesMensuelles = Number(resultats?.economiesMensuelles || 0);
+  const roi12Mois = Number(resultats?.roi12Mois || 0);
+  const paybackMois = Number(resultats?.paybackMois || 0);
+
+  const paybackText = Number.isFinite(paybackMois) ? `${paybackMois.toFixed(1)} mois` : 'à confirmer';
+
+  return [
+    `Économies mensuelles estimées : ${formatEuros(economiesMensuelles)}`,
+    `ROI sur 12 mois : ${roi12Mois.toFixed(1)} %`,
+    `Délai de retour sur investissement : ${paybackText}`,
+  ].join('<br/>');
+}
+
 function generateReportHTML(data) {
-  const { lead, resultats } = data;
+  const { lead, resultats } = data || {};
+  const safeResultats = isRecord(resultats) ? resultats : {};
+  const safeLead = isRecord(lead) ? lead : {};
+
+  const economiesMensuelles = Number(safeResultats.economiesMensuelles || 0);
+  const coutActuel = isRecord(safeResultats.coutActuel) ? safeResultats.coutActuel : {};
+  const coutAKS = isRecord(safeResultats.coutAKS) ? safeResultats.coutAKS : {};
+  const economiesParAxe = isRecord(safeResultats.economiesParAxe) ? safeResultats.economiesParAxe : {};
+  const roi12Mois = Number(safeResultats.roi12Mois || 0);
+  const paybackMois = Number(safeResultats.paybackMois || 0);
+  const getValue = (source, key, fallback = 0) => Number(source?.[key] ?? fallback);
 
   return `
   <!DOCTYPE html>
@@ -635,13 +624,13 @@ function generateReportHTML(data) {
 
     <h2>Client</h2>
     <div class="box">
-      <strong>${lead.prenom || ''} ${lead.nom || ''}</strong><br/>
-      ${lead.societe || '-'}<br/>
-      ${lead.email || '-'}
+      <strong>${String(safeLead.prenom || '')} ${String(safeLead.nom || '')}</strong><br/>
+      ${String(safeLead.societe || '-')}<br/>
+      ${String(safeLead.email || '-')}
     </div>
 
     <div class="hero">
-      <div class="value">${formatEuros(resultats.economiesMensuelles)}</div>
+      <div class="value">${formatEuros(economiesMensuelles)}</div>
       <div>Economies mensuelles estimees</div>
     </div>
 
@@ -651,18 +640,18 @@ function generateReportHTML(data) {
         <tr><th>Axe</th><th>Actuel</th><th>AKS</th><th>Economies</th></tr>
       </thead>
       <tbody>
-        <tr><td>Infrastructure</td><td>${formatEuros(resultats.coutActuel.infrastructure)}</td><td>${formatEuros(resultats.coutAKS.infrastructure)}</td><td>${formatEuros(resultats.economiesParAxe.infrastructure)}</td></tr>
-        <tr><td>Deploiements</td><td>${formatEuros(resultats.coutActuel.deploiements)}</td><td>${formatEuros(resultats.coutAKS.deploiements)}</td><td>${formatEuros(resultats.economiesParAxe.deploiements)}</td></tr>
-        <tr><td>Incidents</td><td>${formatEuros(resultats.coutActuel.incidents)}</td><td>${formatEuros(resultats.coutAKS.incidents)}</td><td>${formatEuros(resultats.economiesParAxe.incidents)}</td></tr>
-        <tr><td>Securite</td><td>${formatEuros(resultats.coutActuel.securite)}</td><td>${formatEuros(resultats.coutAKS.securite)}</td><td>${formatEuros(resultats.economiesParAxe.securite)}</td></tr>
-        <tr><th>Total</th><th>${formatEuros(resultats.coutActuel.total)}</th><th>${formatEuros(resultats.coutAKS.total)}</th><th>${formatEuros(resultats.economiesMensuelles)}</th></tr>
+        <tr><td>Infrastructure</td><td>${formatEuros(getValue(coutActuel, 'infrastructure'))}</td><td>${formatEuros(getValue(coutAKS, 'infrastructure'))}</td><td>${formatEuros(getValue(economiesParAxe, 'infrastructure'))}</td></tr>
+        <tr><td>Deploiements</td><td>${formatEuros(getValue(coutActuel, 'deploiements'))}</td><td>${formatEuros(getValue(coutAKS, 'deploiements'))}</td><td>${formatEuros(getValue(economiesParAxe, 'deploiements'))}</td></tr>
+        <tr><td>Incidents</td><td>${formatEuros(getValue(coutActuel, 'incidents'))}</td><td>${formatEuros(getValue(coutAKS, 'incidents'))}</td><td>${formatEuros(getValue(economiesParAxe, 'incidents'))}</td></tr>
+        <tr><td>Securite</td><td>${formatEuros(getValue(coutActuel, 'securite'))}</td><td>${formatEuros(getValue(coutAKS, 'securite'))}</td><td>${formatEuros(getValue(economiesParAxe, 'securite'))}</td></tr>
+        <tr><th>Total</th><th>${formatEuros(getValue(coutActuel, 'total'))}</th><th>${formatEuros(getValue(coutAKS, 'total'))}</th><th>${formatEuros(economiesMensuelles)}</th></tr>
       </tbody>
     </table>
 
     <h2>Indicateurs</h2>
     <div class="box">
-      ROI 12 mois: <strong>${Number(resultats.roi12Mois).toFixed(1)}%</strong><br/>
-      Payback: <strong>${Number(resultats.paybackMois).toFixed(1)} mois</strong>
+      ROI 12 mois: <strong>${Number(roi12Mois).toFixed(1)}%</strong><br/>
+      Payback: <strong>${Number(paybackMois).toFixed(1)} mois</strong>
     </div>
   </body>
   </html>
@@ -713,7 +702,7 @@ function getSmtpConfig() {
   };
 }
 
-async function sendLeadReportEmail({ lead, pdfBuffer }) {
+async function sendLeadReportEmail({ lead, pdfBuffer, resultats }) {
   const config = getSmtpConfig();
   if (!config) {
     throw new Error('Configuration SMTP manquante');
@@ -729,15 +718,22 @@ async function sendLeadReportEmail({ lead, pdfBuffer }) {
     },
   });
 
+  const firstName = String(lead.prenom || '').trim() || 'cher prospect';
+  const reportSummary = buildLeadReportSummary(resultats);
+
+  const recipientEmail = process.env.RECIPIENT_EMAIL || 'asmaa.eljraoui@clouddevfusion.com';
+
   await transporter.sendMail({
     from: `${config.fromName} <${config.fromEmail}>`,
-    to: lead.email,
-    subject: 'Votre rapport d analyse ROI Azure AKS',
+    to: recipientEmail,
+    subject: 'Votre rapport ROI Azure AKS est prêt',
     html: `
-      <p>Bonjour ${lead.prenom},</p>
-      <p>Merci pour votre simulation ROI Azure AKS.</p>
-      <p>Vous trouverez votre rapport detaille en piece jointe.</p>
-      <p>Cordialement,<br/>CloudDev Fusion</p>
+      <p>Bonjour ${firstName},</p>
+      <p>Merci pour votre simulation ROI Azure AKS. Nous vous remercions pour votre confiance et votre temps.</p>
+      <p>Voici un résumé de votre rapport :</p>
+      <p>${reportSummary}</p>
+      <p>Vous trouverez votre rapport complet en pièce jointe au format PDF.</p>
+      <p>Cordialement,<br/>L'équipe CloudDev Fusion</p>
     `,
     attachments: [
       {
@@ -775,6 +771,88 @@ async function ensureDefaultAdminAccount() {
   );
 }
 
+async function syncLegacyLeadRowsToAdminStore() {
+  const [legacyRows] = await db.execute(`
+    SELECT
+      Id_LEAD,
+      nom,
+      prenom,
+      email,
+      societe,
+      role_poste,
+      consentement_rgpd,
+      statut_crm,
+      date_soumission,
+      rapport_envoye
+    FROM \`lead\`
+    ORDER BY date_soumission DESC, Id_LEAD DESC
+  `);
+
+  for (const row of legacyRows) {
+    const email = String(row.email || '').trim();
+    const submittedAt = row.date_soumission
+      ? new Date(row.date_soumission)
+      : new Date();
+
+    if (!email) {
+      continue;
+    }
+
+    const [existingRows] = await db.execute(
+      `SELECT id FROM lead_submissions WHERE email = ? LIMIT 1`,
+      [email]
+    );
+
+    if (existingRows.length > 0) {
+      continue;
+    }
+
+    const payload = {
+      nom: row.nom,
+      prenom: row.prenom,
+      societe: row.societe,
+      email,
+      role: row.role_poste,
+      telephone: null,
+      consentementRGPD: Boolean(row.consentement_rgpd),
+    };
+
+    const resultsPayload = {};
+
+    await db.execute(
+      `
+      INSERT INTO lead_submissions (
+        email, nom, prenom, societe, role, telephone, submitted_at, lead_json, results_json, pdf_sent, contacted, email_count, last_email_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        email,
+        String(row.nom || '').trim(),
+        String(row.prenom || '').trim(),
+        String(row.societe || '').trim() || null,
+        String(row.role_poste || '').trim() || null,
+        null,
+        submittedAt.toISOString().slice(0, 19).replace('T', ' '),
+        JSON.stringify(payload),
+        JSON.stringify(resultsPayload),
+        Boolean(row.rapport_envoye) ? 1 : 0,
+        String(row.statut_crm || '').trim().toUpperCase() === 'CONTACTE' ? 1 : 0,
+        0,
+        null,
+      ]
+    );
+  }
+}
+
+async function ensureColumnExists(tableName, columnName, definitionSql) {
+  const [rows] = await db.execute(`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`, [tableName, columnName]);
+  if (rows.length > 0) {
+    return;
+  }
+
+  await db.execute(`ALTER TABLE \`${tableName}\` ADD COLUMN ${definitionSql}`);
+}
+
 async function ensureTables() {
   await db.execute(`
     CREATE TABLE IF NOT EXISTS admin (
@@ -791,7 +869,109 @@ async function ensureTables() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
 
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS lead_submissions (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      email VARCHAR(255) NOT NULL,
+      nom VARCHAR(255) NOT NULL,
+      prenom VARCHAR(255) NOT NULL,
+      societe VARCHAR(255) NULL,
+      role VARCHAR(255) NULL,
+      telephone VARCHAR(50) NULL,
+      submitted_at DATETIME NOT NULL,
+      lead_json JSON NOT NULL,
+      results_json JSON NOT NULL,
+      pdf_sent TINYINT(1) NOT NULL DEFAULT 0,
+      contacted TINYINT(1) NOT NULL DEFAULT 0,
+      status_note TEXT NULL,
+      status VARCHAR(50) NOT NULL DEFAULT 'NOUVEAU',
+      note TEXT NULL,
+      next_action_date DATE NULL,
+      next_action VARCHAR(255) NULL,
+      last_contacted_at DATETIME NULL,
+      last_pdf_sent_at DATETIME NULL,
+      email_count INT UNSIGNED NOT NULL DEFAULT 0,
+      last_email_at DATETIME NULL,
+      pdf_download_count INT UNSIGNED NOT NULL DEFAULT 0,
+      last_pdf_download_at DATETIME NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      KEY idx_lead_submissions_email (email),
+      KEY idx_lead_submissions_submitted_at (submitted_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `);
+
+  // Older installations may already have an admin table without the newer
+  // session-tracking fields. CREATE TABLE IF NOT EXISTS does not add them.
+  await ensureColumnExists('admin', 'actif', 'actif TINYINT(1) NOT NULL DEFAULT 1');
+  await ensureColumnExists('admin', 'derniere_cnx', 'derniere_cnx DATETIME NULL');
+
+  await ensureColumnExists('lead_submissions', 'status', "status VARCHAR(50) NOT NULL DEFAULT 'NOUVEAU'");
+  await ensureColumnExists('lead_submissions', 'note', 'note TEXT NULL');
+  await ensureColumnExists('lead_submissions', 'next_action_date', 'next_action_date DATE NULL');
+  await ensureColumnExists('lead_submissions', 'next_action', 'next_action VARCHAR(255) NULL');
+
   await ensureDefaultAdminAccount();
+  await syncLegacyLeadRowsToAdminStore();
+}
+
+async function syncLeadToAdminStore({ lead, resultats, submittedAt, emailSent }) {
+  await ensureTables();
+
+  const payload = {
+    nom: lead.nom,
+    prenom: lead.prenom,
+    societe: lead.societe,
+    email: lead.email,
+    role: lead.role,
+    telephone: lead.telephone || null,
+    consentementRGPD: Boolean(lead.consentementRGPD),
+  };
+
+  const resultsPayload = {
+    coutActuel: resultats?.coutActuel || {},
+    coutAKS: resultats?.coutAKS || {},
+    economiesMensuelles: Number(resultats?.economiesMensuelles || 0),
+    roi12Mois: Number(resultats?.roi12Mois || 0),
+    paybackMois: Number(resultats?.paybackMois || 0),
+    investissementInitial: Number(resultats?.investissementInitial || 0),
+  };
+
+  await db.execute(
+    `
+    INSERT INTO lead_submissions (
+      email, nom, prenom, societe, role, telephone, submitted_at, lead_json, results_json, pdf_sent, contacted, email_count, last_email_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON DUPLICATE KEY UPDATE
+      nom = VALUES(nom),
+      prenom = VALUES(prenom),
+      societe = VALUES(societe),
+      role = VALUES(role),
+      telephone = VALUES(telephone),
+      submitted_at = VALUES(submitted_at),
+      lead_json = VALUES(lead_json),
+      results_json = VALUES(results_json),
+      pdf_sent = VALUES(pdf_sent),
+      contacted = VALUES(contacted),
+      email_count = VALUES(email_count),
+      last_email_at = VALUES(last_email_at)
+    `,
+    [
+      String(lead.email || '').trim(),
+      String(lead.nom || '').trim(),
+      String(lead.prenom || '').trim(),
+      String(lead.societe || '').trim() || null,
+      String(lead.role || '').trim() || null,
+      String(lead.telephone || '').trim() || null,
+      submittedAt instanceof Date ? submittedAt.toISOString().slice(0, 19).replace('T', ' ') : new Date().toISOString().slice(0, 19).replace('T', ' '),
+      JSON.stringify(payload),
+      JSON.stringify(resultsPayload),
+      emailSent ? 1 : 0,
+      0,
+      emailSent ? 1 : 0,
+      emailSent ? submittedAt instanceof Date ? submittedAt.toISOString().slice(0, 19).replace('T', ' ') : new Date().toISOString().slice(0, 19).replace('T', ' ') : null,
+    ]
+  );
 }
 
 function asBoolean(value) {
@@ -812,10 +992,25 @@ function toIso(value) {
 }
 
 function parseStatusFilter(value) {
-  if (value === 'new' || value === 'pdf_sent' || value === 'contacted') {
+  if (['new', 'pdf_sent', 'contacted', 'relance', 'rdv', 'interested', 'not_interested', 'client', 'lost'].includes(value)) {
     return value;
   }
   return 'all';
+}
+
+function normalizeLeadStatus(value) {
+  const normalized = String(value || 'NOUVEAU').trim().toUpperCase();
+  const aliases = {
+    'A RELANCER': 'A_RELANCER',
+    CONTACTER: 'A_CONTACTER',
+    'A CONTACTER': 'A_CONTACTER',
+    'RENDEZ-VOUS': 'RDV_PLANIFIE',
+    RDV: 'RDV_PLANIFIE',
+  };
+  const resolved = aliases[normalized] || normalized;
+  const allowed = ['NOUVEAU', 'A_CONTACTER', 'CONTACTE', 'A_RELANCER', 'RDV_PLANIFIE', 'INTERESSE', 'NON_INTERESSE', 'CLIENT', 'PERDU'];
+  if (allowed.includes(resolved)) return resolved;
+  return 'NOUVEAU';
 }
 
 app.get('/health', (req, res) => {
@@ -896,7 +1091,7 @@ app.post('/api/leads', async (req, res) => {
     let emailSent = false;
     let emailError = null;
     try {
-      await sendLeadReportEmail({ lead, pdfBuffer });
+      await sendLeadReportEmail({ lead, pdfBuffer, resultats });
       emailSent = true;
     } catch (mailError) {
       emailError = mailError instanceof Error ? mailError.message : 'Envoi email impossible';
@@ -907,6 +1102,12 @@ app.post('/api/leads', async (req, res) => {
     let legacyMirrorError = null;
     try {
       await ensureTables();
+      await syncLeadToAdminStore({
+        lead,
+        resultats,
+        submittedAt,
+        emailSent,
+      });
       legacyMirror = await mirrorLeadToLegacyTables({
         lead,
         answers,
@@ -948,14 +1149,16 @@ app.post('/api/leads', async (req, res) => {
 
 app.post('/api/admin/login', async (req, res) => {
   try {
+    const sessionSecret = process.env.ADMIN_SESSION_SECRET || 'aks-calculator-admin-secret';
     if (!sessionSecret) {
       return res.status(500).json({ error: 'ADMIN_SESSION_SECRET manquant' });
     }
 
     await ensureTables();
 
-    const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
-    const password = typeof req.body?.password === 'string' ? req.body.password : '';
+    const body = isRecord(req.body) ? req.body : {};
+    const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
+    const password = typeof body.password === 'string' ? body.password : '';
 
     if (!email || !password) {
       return res.status(400).json({ error: 'Email et mot de passe requis' });
@@ -1021,6 +1224,98 @@ app.get('/api/admin/me', requireAdminSession, (req, res) => {
   });
 });
 
+app.post('/api/admin/leads', requireAdminSession, async (req, res) => {
+  try {
+    await ensureTables();
+
+    const body = isRecord(req.body) ? req.body : {};
+    const prenom = typeof body.prenom === 'string' ? body.prenom.trim() : '';
+    const nom = typeof body.nom === 'string' ? body.nom.trim() : '';
+    const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
+    const societe = typeof body.societe === 'string' ? body.societe.trim() : '';
+    const role = typeof body.role === 'string' ? body.role.trim() : '';
+    const telephone = typeof body.telephone === 'string' ? body.telephone.trim() : '';
+    const note = typeof body.note === 'string' ? body.note.trim() : '';
+    const status = typeof body.status === 'string' ? normalizeLeadStatus(body.status) : 'NOUVEAU';
+    const contacted = body.contacted === true || status === 'CONTACTE' || status === 'CLIENT';
+    const pdfSent = body.pdfSent === true || status === 'CLIENT' || status === 'CONTACTE';
+
+    if (!prenom || !nom || !email) {
+      return res.status(400).json({ error: 'Prénom, nom et email sont requis' });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ error: 'Email invalide' });
+    }
+
+    const [existingRows] = await db.execute('SELECT id FROM `lead_submissions` WHERE email = ? LIMIT 1', [email]);
+    if (existingRows.length > 0) {
+      return res.status(409).json({ error: 'Un lead avec cet email existe déjà' });
+    }
+
+    const submittedAt = new Date();
+    const leadPayload = {
+      nom,
+      prenom,
+      societe: societe || null,
+      email,
+      role: role || null,
+      telephone: telephone || null,
+      consentementRGPD: true,
+    };
+
+    const resultsPayload = {};
+
+    await db.execute(
+      `
+      INSERT INTO lead_submissions (
+        email, nom, prenom, societe, role, telephone, submitted_at, lead_json, results_json, pdf_sent, contacted, status, note, status_note, next_action_date, next_action
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        email,
+        nom,
+        prenom,
+        societe || null,
+        role || null,
+        telephone || null,
+        submittedAt.toISOString().slice(0, 19).replace('T', ' '),
+        JSON.stringify(leadPayload),
+        JSON.stringify(resultsPayload),
+        pdfSent ? 1 : 0,
+        contacted ? 1 : 0,
+        status,
+        note || null,
+        note || null,
+        null,
+        null,
+      ]
+    );
+
+    const [createdRows] = await db.execute('SELECT id FROM `lead_submissions` WHERE email = ? ORDER BY id DESC LIMIT 1', [email]);
+    const createdLead = createdRows[0];
+
+    return res.status(201).json({
+      success: true,
+      lead: {
+        id: createdLead?.id || null,
+        nom,
+        prenom,
+        email,
+        societe: societe || null,
+        role: role || null,
+        telephone: telephone || null,
+        note: note || null,
+        status,
+      },
+    });
+  } catch (error) {
+    console.error('Admin lead create error:', error);
+    return res.status(500).json({ error: 'Impossible d’ajouter le lead' });
+  }
+});
+
 app.get('/api/admin/leads', requireAdminSession, async (req, res) => {
   try {
     await ensureTables();
@@ -1038,11 +1333,24 @@ app.get('/api/admin/leads', requireAdminSession, async (req, res) => {
     }
 
     if (status === 'new') {
-      whereParts.push('COALESCE(l.rapport_envoye, 0) = 0 AND UPPER(COALESCE(l.statut_crm, "")) <> "CONTACTE"');
+      whereParts.push('COALESCE(l.pdf_sent, 0) = 0 AND COALESCE(l.contacted, 0) = 0');
     } else if (status === 'pdf_sent') {
-      whereParts.push('COALESCE(l.rapport_envoye, 0) = 1');
+      whereParts.push('COALESCE(l.pdf_sent, 0) = 1');
     } else if (status === 'contacted') {
-      whereParts.push('UPPER(COALESCE(l.statut_crm, "")) = "CONTACTE"');
+      whereParts.push('COALESCE(l.contacted, 0) = 1');
+    } else {
+      const statusMap = {
+        relance: 'A_RELANCER',
+        rdv: 'RDV_PLANIFIE',
+        interested: 'INTERESSE',
+        not_interested: 'NON_INTERESSE',
+        client: 'CLIENT',
+        lost: 'PERDU',
+      };
+      if (statusMap[status]) {
+        whereParts.push('l.status = ?');
+        params.push(statusMap[status]);
+      }
     }
 
     const whereClause = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
@@ -1050,102 +1358,119 @@ app.get('/api/admin/leads', requireAdminSession, async (req, res) => {
     const [rows] = await db.execute(
       `
       SELECT
-        l.Id_LEAD AS id,
+        l.id,
         l.nom,
         l.prenom,
         l.email,
         l.societe,
-        l.role_poste AS role,
-        NULL AS telephone,
-        l.date_soumission AS submitted_at,
-        COALESCE(l.rapport_envoye, 0) AS pdf_sent,
-        CASE WHEN UPPER(COALESCE(l.statut_crm, '')) = 'CONTACTE' THEN 1 ELSE 0 END AS contacted,
-        NULL AS status_note,
-        NULL AS last_contacted_at,
-        NULL AS last_pdf_sent_at,
-        COALESCE(mail.email_count, 0) AS email_count,
-        mail.last_email_at,
-        r.cout_actuel_infra,
-        r.cout_actuel_deploy,
-        r.cout_actuel_incidents,
-        r.cout_actuel_securite,
-        r.cout_actuel_total,
-        r.cout_aks_infra,
-        r.cout_aks_deploy,
-        r.cout_aks_incidents,
-        r.cout_aks_securite,
-        r.cout_aks_total,
-        r.economies_mensuelles,
-        r.roi_12_mois,
-        r.payback_mois,
-        r.investissement_initial
-      FROM \`lead\` l
-      LEFT JOIN (
-        SELECT s1.*
-        FROM \`simulation\` s1
-        INNER JOIN (
-          SELECT Id_LEAD, MAX(Id_SIMULATION) AS max_simulation_id
-          FROM \`simulation\`
-          GROUP BY Id_LEAD
-        ) latest ON latest.max_simulation_id = s1.Id_SIMULATION
-      ) sim ON sim.Id_LEAD = l.Id_LEAD
-      LEFT JOIN \`resultat\` r ON r.Id_SIMULATION = sim.Id_SIMULATION
-      LEFT JOIN (
-        SELECT Id_LEAD, COUNT(*) AS email_count, MAX(date_envoi) AS last_email_at
-        FROM \`email_log\`
-        GROUP BY Id_LEAD
-      ) mail ON mail.Id_LEAD = l.Id_LEAD
+        l.role,
+        l.telephone,
+        l.submitted_at,
+        l.pdf_sent,
+        l.contacted,
+        l.status_note,
+        l.status,
+        l.note,
+        l.next_action_date,
+        l.next_action,
+        l.last_contacted_at,
+        l.last_pdf_sent_at,
+        l.email_count,
+        l.last_email_at,
+        l.pdf_download_count,
+        l.last_pdf_download_at,
+        l.lead_json,
+        l.results_json
+      FROM \`lead_submissions\` AS l
       ${whereClause}
-      ORDER BY l.date_soumission DESC
+      ORDER BY l.submitted_at DESC
       LIMIT 300
       `,
       params
     );
 
-    const leads = rows.map((row) => ({
-      id: row.id,
-      nom: row.nom,
-      prenom: row.prenom,
-      email: row.email,
-      societe: row.societe,
-      role: row.role,
-      telephone: row.telephone,
-      submittedAt: toIso(row.submitted_at),
-      pdfSent: asBoolean(row.pdf_sent),
-      contacted: asBoolean(row.contacted),
-      statusNote: row.status_note,
-      lastContactedAt: toIso(row.last_contacted_at),
-      lastPdfSentAt: toIso(row.last_pdf_sent_at),
-      emailCount: Number(row.email_count || 0),
-      lastEmailAt: toIso(row.last_email_at),
-      results: {
-        coutActuel: {
-          infrastructure: toNumber(row.cout_actuel_infra),
-          deploiements: toNumber(row.cout_actuel_deploy),
-          incidents: toNumber(row.cout_actuel_incidents),
-          securite: toNumber(row.cout_actuel_securite),
-          total: toNumber(row.cout_actuel_total),
-        },
-        coutAKS: {
-          infrastructure: toNumber(row.cout_aks_infra),
-          deploiements: toNumber(row.cout_aks_deploy),
-          incidents: toNumber(row.cout_aks_incidents),
-          securite: toNumber(row.cout_aks_securite),
-          total: toNumber(row.cout_aks_total),
-        },
-        economiesMensuelles: toNumber(row.economies_mensuelles),
-        roi12Mois: toNumber(row.roi_12_mois),
-        paybackMois: toNumber(row.payback_mois),
-        investissementInitial: toNumber(row.investissement_initial),
-      },
-      leadPayload: {
+    const leads = rows.map((row) => {
+      const leadPayload = (() => {
+        const value = row.lead_json;
+        if (isRecord(value)) {
+          return value;
+        }
+        if (typeof value === 'string') {
+          try {
+            return JSON.parse(value);
+          } catch {
+            return {};
+          }
+        }
+        return {};
+      })();
+
+      const resultsPayload = (() => {
+        const value = row.results_json;
+        if (isRecord(value)) {
+          return value;
+        }
+        if (typeof value === 'string') {
+          try {
+            return JSON.parse(value);
+          } catch {
+            return {};
+          }
+        }
+        return {};
+      })();
+
+      return {
+        id: row.id,
         nom: row.nom,
         prenom: row.prenom,
-        societe: row.societe,
         email: row.email,
+        societe: row.societe,
         role: row.role,
-      },
-    }));
+        telephone: row.telephone,
+        submittedAt: toIso(row.submitted_at),
+        pdfSent: asBoolean(row.pdf_sent),
+        contacted: asBoolean(row.contacted),
+        statusNote: row.note ?? row.status_note,
+        status: normalizeLeadStatus(row.status || row.status_note),
+        note: row.note ?? row.status_note,
+        nextActionDate: row.next_action_date ? String(row.next_action_date) : null,
+        nextAction: row.next_action || null,
+        lastContactedAt: toIso(row.last_contacted_at),
+        lastPdfSentAt: toIso(row.last_pdf_sent_at),
+        emailCount: Number(row.email_count || 0),
+        lastEmailAt: toIso(row.last_email_at),
+        pdfDownloadCount: Number(row.pdf_download_count || 0),
+        lastPdfDownloadAt: toIso(row.last_pdf_download_at),
+        results: {
+          coutActuel: {
+            infrastructure: toNumber(resultsPayload?.coutActuel?.infrastructure),
+            deploiements: toNumber(resultsPayload?.coutActuel?.deploiements),
+            incidents: toNumber(resultsPayload?.coutActuel?.incidents),
+            securite: toNumber(resultsPayload?.coutActuel?.securite),
+            total: toNumber(resultsPayload?.coutActuel?.total),
+          },
+          coutAKS: {
+            infrastructure: toNumber(resultsPayload?.coutAKS?.infrastructure),
+            deploiements: toNumber(resultsPayload?.coutAKS?.deploiements),
+            incidents: toNumber(resultsPayload?.coutAKS?.incidents),
+            securite: toNumber(resultsPayload?.coutAKS?.securite),
+            total: toNumber(resultsPayload?.coutAKS?.total),
+          },
+          economiesMensuelles: toNumber(resultsPayload?.economiesMensuelles),
+          roi12Mois: toNumber(resultsPayload?.roi12Mois),
+          paybackMois: toNumber(resultsPayload?.paybackMois),
+          investissementInitial: toNumber(resultsPayload?.investissementInitial),
+        },
+        leadPayload: {
+          nom: leadPayload.nom ?? row.nom,
+          prenom: leadPayload.prenom ?? row.prenom,
+          societe: leadPayload.societe ?? row.societe,
+          email: leadPayload.email ?? row.email,
+          role: leadPayload.role ?? row.role,
+        },
+      };
+    });
 
     return res.json({ leads });
   } catch (error) {
@@ -1169,42 +1494,29 @@ app.get('/api/admin/stats', requireAdminSession, async (req, res) => {
     monthStart.setDate(1);
     monthStart.setHours(0, 0, 0, 0);
 
-    const [leadTotalsRows] = await db.execute(
+    const [leadRows] = await db.execute(
       `
-      SELECT
-        COUNT(*) AS total,
-        SUM(CASE WHEN date_soumission >= ? THEN 1 ELSE 0 END) AS leads_this_week,
-        SUM(CASE WHEN date_soumission >= ? THEN 1 ELSE 0 END) AS leads_this_month,
-        SUM(CASE WHEN UPPER(COALESCE(statut_crm, '')) = 'CONTACTE' THEN 1 ELSE 0 END) AS contacted_total,
-        SUM(CASE WHEN COALESCE(rapport_envoye, 0) = 1 THEN 1 ELSE 0 END) AS pdf_sent_total
-      FROM \`lead\`
+      SELECT COUNT(*) AS total_leads,
+             SUM(CASE WHEN submitted_at >= ? THEN 1 ELSE 0 END) AS leads_this_week,
+             SUM(CASE WHEN submitted_at >= ? THEN 1 ELSE 0 END) AS leads_this_month,
+             SUM(CASE WHEN contacted = 1 THEN 1 ELSE 0 END) AS contacted_total,
+             SUM(CASE WHEN pdf_sent = 1 THEN 1 ELSE 0 END) AS pdf_sent_total
+      FROM \`lead_submissions\`
       `,
       [weekStart, monthStart]
     );
 
-    const [simulationRows] = await db.execute(
-      `
-      SELECT COUNT(*) AS simulations_this_week
-      FROM \`simulation\` s
-      INNER JOIN \`lead\` l ON l.Id_LEAD = s.Id_LEAD
-      WHERE l.date_soumission >= ?
-      `,
-      [weekStart]
-    );
-
-    const totals = leadTotalsRows[0] || {};
-    const simulationStats = simulationRows[0] || {};
-
+    const totals = leadRows[0] || {};
     const leadsThisWeek = Number(totals.leads_this_week || 0);
     const visitsThisWeek = 0;
 
     const stats = {
-      totalLeads: Number(totals.total || 0),
+      totalLeads: Number(totals.total_leads || 0),
       leadsThisWeek,
       leadsThisMonth: Number(totals.leads_this_month || 0),
       contactedCount: Number(totals.contacted_total || 0),
       pdfSentCount: Number(totals.pdf_sent_total || 0),
-      simulationsThisWeek: Number(simulationStats.simulations_this_week || 0),
+      simulationsThisWeek: 0,
       visitsThisWeek,
       conversionRate: visitsThisWeek > 0 ? Number(((leadsThisWeek / visitsThisWeek) * 100).toFixed(1)) : null,
     };
@@ -1229,6 +1541,13 @@ app.patch('/api/admin/leads/:id', requireAdminSession, async (req, res) => {
     const hasAny =
       typeof payload.pdfSent === 'boolean' ||
       typeof payload.contacted === 'boolean' ||
+      typeof payload.status === 'string' ||
+      typeof payload.note === 'string' ||
+      payload.note === null ||
+      typeof payload.nextActionDate === 'string' ||
+      payload.nextActionDate === null ||
+      typeof payload.nextAction === 'string' ||
+      payload.nextAction === null ||
       typeof payload.statusNote === 'string' ||
       payload.statusNote === null;
 
@@ -1236,29 +1555,73 @@ app.patch('/api/admin/leads/:id', requireAdminSession, async (req, res) => {
       return res.status(400).json({ error: 'Aucune modification demandee' });
     }
 
-    const [leadRows] = await db.execute('SELECT Id_LEAD FROM \`lead\` WHERE Id_LEAD = ? LIMIT 1', [leadId]);
-    if (!leadRows.length) {
+    const [submissionRows] = await db.execute(
+      'SELECT id, email, status_note, status, note, next_action_date, next_action, pdf_sent, contacted FROM \`lead_submissions\` WHERE id = ? LIMIT 1',
+      [leadId]
+    );
+    if (!submissionRows.length) {
       return res.status(404).json({ error: 'Lead introuvable' });
     }
 
-    const [currentRows] = await db.execute(
-      'SELECT rapport_envoye, statut_crm FROM \`lead\` WHERE Id_LEAD = ? LIMIT 1',
-      [leadId]
-    );
-
-    const current = currentRows[0];
-    const nextPdfSent =
-      typeof payload.pdfSent === 'boolean' ? toTinyInt(payload.pdfSent) : toTinyInt(asBoolean(current.rapport_envoye));
-
-    let nextStatut = typeof current.statut_crm === 'string' && current.statut_crm ? current.statut_crm : 'NOUVEAU';
-    if (typeof payload.contacted === 'boolean') {
-      nextStatut = payload.contacted ? 'CONTACTE' : 'NOUVEAU';
-    }
+    const current = submissionRows[0];
+    const nextStatus = typeof payload.status === 'string' ? normalizeLeadStatus(payload.status) : normalizeLeadStatus(current.status || current.status_note);
+    const nextPdfSent = typeof payload.pdfSent === 'boolean'
+      ? toTinyInt(payload.pdfSent)
+      : nextStatus === 'CLIENT' || nextStatus === 'CONTACTE' || nextStatus === 'A_RELANCER'
+        ? 1
+        : toTinyInt(asBoolean(current.pdf_sent));
+    const nextContacted = typeof payload.contacted === 'boolean'
+      ? toTinyInt(payload.contacted)
+      : nextStatus === 'CLIENT' || nextStatus === 'CONTACTE'
+        ? 1
+        : toTinyInt(asBoolean(current.contacted));
+    const nextNote = typeof payload.note !== 'undefined'
+      ? payload.note
+      : (typeof payload.statusNote !== 'undefined' ? payload.statusNote : (current.note ?? current.status_note));
+    const nextActionDate = typeof payload.nextActionDate !== 'undefined' ? payload.nextActionDate : current.next_action_date;
+    const nextAction = typeof payload.nextAction !== 'undefined' ? payload.nextAction : current.next_action;
+    const nextStatut = nextStatus === 'CLIENT' ? 'CLIENT' : nextContacted ? 'CONTACTE' : 'NOUVEAU';
 
     await db.execute(
-      'UPDATE \`lead\` SET rapport_envoye = ?, statut_crm = ? WHERE Id_LEAD = ?',
-      [nextPdfSent, nextStatut, leadId]
+      'UPDATE \`lead_submissions\` SET pdf_sent = ?, contacted = ?, status = ?, note = ?, next_action_date = ?, next_action = ?, status_note = ?, last_pdf_sent_at = ?, last_contacted_at = ? WHERE id = ?',
+      [nextPdfSent, nextContacted, nextStatus, nextNote, nextActionDate || null, nextAction || null, nextNote, nextPdfSent ? new Date() : null, nextContacted ? new Date() : null, leadId]
     );
+
+    const [legacyRows] = await db.execute('SELECT Id_LEAD FROM \`lead\` WHERE email = ? LIMIT 1', [current.email]);
+    if (legacyRows.length) {
+      await db.execute(
+        'UPDATE \`lead\` SET rapport_envoye = ?, statut_crm = ?, date_modification = CURRENT_TIMESTAMP WHERE Id_LEAD = ?',
+        [nextPdfSent, nextStatut, legacyRows[0].Id_LEAD]
+      );
+    }
+
+    if (typeof payload.statusNote !== 'undefined' && payload.statusNote !== current.status_note) {
+      const legacyId = legacyRows[0]?.Id_LEAD;
+      if (legacyId) {
+        await recordLeadActivity({
+          leadId: legacyId,
+          adminId: req.adminSession?.userId || 1,
+          type: 'note_ajoutee',
+          content: payload.statusNote ?? null,
+          oldStatus: current.status_note || null,
+          newStatus: nextStatut,
+        });
+      }
+    }
+
+    if (typeof payload.contacted === 'boolean' && payload.contacted !== asBoolean(current.contacted)) {
+      const legacyId = legacyRows[0]?.Id_LEAD;
+      if (legacyId) {
+        await recordLeadActivity({
+          leadId: legacyId,
+          adminId: req.adminSession?.userId || 1,
+          type: 'statut_modifie',
+          content: payload.contacted ? 'Lead marque comme contacte' : 'Lead retire du statut contacte',
+          oldStatus: asBoolean(current.contacted) ? 'CONTACTE' : 'NOUVEAU',
+          newStatus: nextStatut,
+        });
+      }
+    }
 
     return res.json({ success: true });
   } catch (error) {
@@ -1282,10 +1645,12 @@ app.post('/api/admin/leads/:id/email', requireAdminSession, async (req, res) => 
       return res.status(400).json({ error: 'Sujet et contenu requis' });
     }
 
-    const [rows] = await db.execute('SELECT email FROM \`lead\` WHERE Id_LEAD = ? LIMIT 1', [leadId]);
+    const [rows] = await db.execute('SELECT id, email FROM \`lead_submissions\` WHERE id = ? LIMIT 1', [leadId]);
     if (!rows.length) {
       return res.status(404).json({ error: 'Lead introuvable' });
     }
+
+    const submission = rows[0];
 
     await db.execute(
       `
@@ -1303,7 +1668,23 @@ app.post('/api/admin/leads/:id/email', requireAdminSession, async (req, res) => 
       ]
     );
 
-    await db.execute('UPDATE \`lead\` SET statut_crm = ? WHERE Id_LEAD = ?', ['CONTACTE', leadId]);
+    await db.execute(
+      'UPDATE \`lead_submissions\` SET contacted = 1, last_contacted_at = ?, email_count = email_count + 1, last_email_at = ? WHERE id = ?',
+      [new Date(), new Date(), leadId]
+    );
+
+    const [legacyRows] = await db.execute('SELECT Id_LEAD FROM \`lead\` WHERE email = ? LIMIT 1', [submission.email]);
+    if (legacyRows.length) {
+      await db.execute('UPDATE \`lead\` SET statut_crm = ?, rapport_envoye = 1, date_modification = CURRENT_TIMESTAMP WHERE Id_LEAD = ?', ['CONTACTE', legacyRows[0].Id_LEAD]);
+      await recordLeadActivity({
+        leadId: legacyRows[0].Id_LEAD,
+        adminId: req.adminSession?.userId || 1,
+        type: 'email_envoye',
+        content: subject,
+        oldStatus: 'NOUVEAU',
+        newStatus: 'CONTACTE',
+      });
+    }
 
     return res.json({ success: true, message: 'Relance enregistree' });
   } catch (error) {

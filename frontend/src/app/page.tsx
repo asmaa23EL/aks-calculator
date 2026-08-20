@@ -5,210 +5,165 @@ import { ArrowRight, CheckCircle, TrendingUp, Shield, Zap } from 'lucide-react';
 
 export default function HomePage() {
   return (
-    <div className="bg-gradient-to-b from-primary-50 to-white">
-      {/* Hero Section */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
-        <div className="text-center">
-          <div className="inline-flex items-center gap-2 bg-primary-100 text-primary-700 px-4 py-2 rounded-full text-sm font-medium mb-6">
-            <span className="w-2 h-2 bg-primary-600 rounded-full animate-pulse"></span>
-            Outil gratuit • 100% confidentiel • Résultats immédiats
-          </div>
-          <h1 className="text-5xl md:text-6xl font-bold text-gray-900 mb-6 leading-tight">
-            Calculez vos économies en migrant <br />
-            <span className="text-primary-600">vers Azure Kubernetes Service</span>
-          </h1>
-          <p className="text-xl text-gray-600 mb-8 max-w-3xl mx-auto leading-relaxed">
-            Découvrez en <strong>5 minutes</strong> combien vous pourriez économiser en migrant votre infrastructure 
-            vers Azure AKS. Obtenez un <strong>ROI précis</strong> et un <strong>rapport détaillé</strong>.
-          </p>
-          <Link 
-            href="/wizard"
-            className="inline-flex items-center gap-2 btn-primary text-lg px-8 py-4 shadow-lg hover:shadow-xl transition-shadow"
-          >
-            Commencer l&apos;évaluation gratuite
-            <ArrowRight className="w-5 h-5" />
-          </Link>
-          <p className="text-sm text-gray-500 mt-6 flex items-center justify-center gap-6 flex-wrap">
-            <span className="flex items-center gap-2">⏱️ 5 minutes</span>
-            <span className="flex items-center gap-2">📊 Résultats instantanés</span>
-            <span className="flex items-center gap-2">📄 Rapport PDF détaillé</span>
-          </p>
-          <div className="mt-12 flex items-center justify-center gap-8 text-sm text-gray-500">
-            <div className="flex items-center gap-2">
-              <CheckCircle className="w-5 h-5 text-green-500" />
-              <span>500+ entreprises</span>
+    <div className="bg-[linear-gradient(180deg,_#F8FAFD_0%,_#F4F9FF_100%)]">
+      <section className="mx-auto max-w-7xl px-4 py-20 sm:px-6 lg:px-8 lg:py-28">
+        <div className="overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-[0_24px_80px_rgba(2,32,74,0.08)]">
+          <div className="grid gap-10 px-6 py-12 lg:grid-cols-[1.1fr_0.9fr] lg:px-12 lg:py-16">
+            <div className="flex flex-col justify-center">
+              <div className="mb-6 inline-flex w-fit items-center gap-2 rounded-full border border-primary-200 bg-primary-50 px-4 py-2 text-sm font-medium text-primary-700">
+                <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-primary-600" />
+                Outil gratuit • 100% confidentiel • Résultats immédiats
+              </div>
+              <h1 className="text-4xl font-semibold leading-tight text-slate-900 sm:text-5xl lg:text-6xl">
+                Calculez vos économies en migrant{' '}
+                <span className="text-primary-600">vers Azure Kubernetes Service</span>
+              </h1>
+              <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-600">
+                Découvrez en <strong>5 minutes</strong> combien vous pourriez économiser en migrer votre infrastructure vers Azure AKS. Obtenez un <strong>ROI précis</strong> et un <strong>rapport détaillé</strong> prêt à partager.
+              </p>
+              <div className="mt-8 flex flex-wrap items-center gap-4">
+                <Link
+                  href="/wizard"
+                  className="inline-flex items-center gap-2 rounded-2xl bg-primary-600 px-7 py-3.5 text-base font-semibold text-white shadow-lg shadow-primary-600/20 transition-all hover:-translate-y-0.5 hover:bg-primary-700"
+                >
+                  Commencer l&apos;évaluation gratuite
+                  <ArrowRight className="h-5 w-5" />
+                </Link>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                  Résultats instantanés • Rapport PDF • Sans engagement
+                </div>
+              </div>
+              <div className="mt-8 flex flex-wrap items-center gap-6 text-sm text-slate-500">
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="h-5 w-5 text-emerald-600" />
+                  <span>500+ entreprises</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="h-5 w-5 text-emerald-600" />
+                  <span>Certifié Microsoft</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="h-5 w-5 text-emerald-600" />
+                  <span>RGPD compliant</span>
+                </div>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <CheckCircle className="w-5 h-5 text-green-500" />
-              <span>Certifié Microsoft</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <CheckCircle className="w-5 h-5 text-green-500" />
-              <span>RGPD compliant</span>
+
+            <div className="rounded-[28px] border border-slate-200 bg-[linear-gradient(135deg,_#001F4D_0%,_#0969F9_100%)] p-8 text-white shadow-inner">
+              <div className="rounded-2xl border border-white/20 bg-white/10 p-5 backdrop-blur">
+                <p className="text-sm font-semibold uppercase tracking-[0.25em] text-blue-100">Vision rapide</p>
+                <h2 className="mt-3 text-2xl font-semibold">Une migration AKS pilotée par les chiffres</h2>
+                <div className="mt-6 space-y-4">
+                  <div className="rounded-2xl bg-white/15 p-4">
+                    <p className="text-sm text-blue-100">Économies estimées</p>
+                    <p className="mt-1 text-3xl font-semibold">+45%</p>
+                  </div>
+                  <div className="rounded-2xl bg-white/15 p-4">
+                    <p className="text-sm text-blue-100">ROI moyen</p>
+                    <p className="mt-1 text-3xl font-semibold">8 mois</p>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Bénéfices */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-        <h2 className="text-3xl font-bold text-center text-gray-900 mb-12">
-          Pourquoi migrer vers Azure AKS ?
-        </h2>
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
-          <div className="card text-center">
-            <div className="flex justify-center mb-4">
-              <TrendingUp className="w-12 h-12 text-primary-600" />
-            </div>
-            <h3 className="text-xl font-semibold mb-2">Réduction des coûts</h3>
-            <p className="text-gray-600">
-              Jusqu&apos;à 60% d&apos;économies sur l&apos;infrastructure grâce à l&apos;autoscaling
-            </p>
-          </div>
-
-          <div className="card text-center">
-            <div className="flex justify-center mb-4">
-              <Zap className="w-12 h-12 text-primary-600" />
-            </div>
-            <h3 className="text-xl font-semibold mb-2">Déploiements rapides</h3>
-            <p className="text-gray-600">
-              Automatisation complète avec GitOps pour des releases sans friction
-            </p>
-          </div>
-
-          <div className="card text-center">
-            <div className="flex justify-center mb-4">
-              <Shield className="w-12 h-12 text-primary-600" />
-            </div>
-            <h3 className="text-xl font-semibold mb-2">Sécurité renforcée</h3>
-            <p className="text-gray-600">
-              Scans automatiques, chiffrement natif et conformité RGPD
-            </p>
-          </div>
-
-          <div className="card text-center">
-            <div className="flex justify-center mb-4">
-              <CheckCircle className="w-12 h-12 text-primary-600" />
-            </div>
-            <h3 className="text-xl font-semibold mb-2">Haute disponibilité</h3>
-            <p className="text-gray-600">
-              Auto-healing et monitoring avancé pour réduire les incidents
-            </p>
-          </div>
-        </div>
-      </section>
-
-      {/* Comment ça marche */}
-      <section className="bg-gray-50 py-16">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <h2 className="text-3xl font-bold text-center text-gray-900 mb-12">
-            Comment ça marche ?
+      <section className="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
+        <div className="mb-10 text-center">
+          <p className="text-sm font-semibold uppercase tracking-[0.25em] text-primary-700">Pourquoi migrer ?</p>
+          <h2 className="mt-3 text-3xl font-semibold text-slate-900 sm:text-4xl">
+            Une plateforme plus performante, plus sûre et plus rentable
           </h2>
-          <div className="grid md:grid-cols-3 gap-8">
-            <div className="text-center">
-              <div className="w-16 h-16 bg-primary-600 text-white rounded-full flex items-center justify-center text-2xl font-bold mx-auto mb-4">
-                1
+        </div>
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+          {[
+            { title: 'Réduction des coûts', text: 'Jusqu’à 60% d’économies sur l’infrastructure grâce à l’autoscaling.', icon: TrendingUp },
+            { title: 'Déploiements rapides', text: 'Automatisation complète avec GitOps pour des releases sans friction.', icon: Zap },
+            { title: 'Sécurité renforcée', text: 'Scans automatiques, chiffrement natif et conformité RGPD.', icon: Shield },
+            { title: 'Haute disponibilité', text: 'Auto-healing et monitoring avancé pour réduire les incidents.', icon: CheckCircle },
+          ].map((item) => {
+            const Icon = item.icon;
+            return (
+              <div key={item.title} className="rounded-[24px] border border-slate-200 bg-white p-7 text-center shadow-sm transition hover:-translate-y-1 hover:shadow-md">
+                <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary-50 text-primary-600">
+                  <Icon className="h-7 w-7" />
+                </div>
+                <h3 className="text-lg font-semibold text-slate-900">{item.title}</h3>
+                <p className="mt-2 text-sm leading-7 text-slate-600">{item.text}</p>
               </div>
-              <h3 className="text-xl font-semibold mb-2">Répondez aux questions</h3>
-              <p className="text-gray-600">
-                En 4 étapes simples, décrivez votre infrastructure actuelle
-              </p>
-            </div>
+            );
+          })}
+        </div>
+      </section>
 
-            <div className="text-center">
-              <div className="w-16 h-16 bg-primary-600 text-white rounded-full flex items-center justify-center text-2xl font-bold mx-auto mb-4">
-                2
+      <section className="bg-slate-50 py-16">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="mb-10 text-center">
+            <p className="text-sm font-semibold uppercase tracking-[0.25em] text-primary-700">Comment ça marche</p>
+            <h2 className="mt-3 text-3xl font-semibold text-slate-900 sm:text-4xl">Un parcours simple, rapide et clair</h2>
+          </div>
+          <div className="grid gap-8 md:grid-cols-3">
+            {[
+              { step: '1', title: 'Répondez aux questions', text: 'En 4 étapes simples, décrivez votre infrastructure actuelle.' },
+              { step: '2', title: 'Obtenez vos résultats', text: 'Visualisez instantanément vos économies potentielles et votre ROI.' },
+              { step: '3', title: 'Recevez le rapport', text: 'Un rapport PDF complet vous est envoyé avec une analyse détaillée.' },
+            ].map((item) => (
+              <div key={item.step} className="rounded-[24px] border border-slate-200 bg-white p-8 text-center shadow-sm">
+                <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-primary-600 text-2xl font-semibold text-white">
+                  {item.step}
+                </div>
+                <h3 className="text-xl font-semibold text-slate-900">{item.title}</h3>
+                <p className="mt-3 text-sm leading-7 text-slate-600">{item.text}</p>
               </div>
-              <h3 className="text-xl font-semibold mb-2">Obtenez vos résultats</h3>
-              <p className="text-gray-600">
-                Visualisez instantanément vos économies potentielles et votre ROI
-              </p>
-            </div>
-
-            <div className="text-center">
-              <div className="w-16 h-16 bg-primary-600 text-white rounded-full flex items-center justify-center text-2xl font-bold mx-auto mb-4">
-                3
-              </div>
-              <h3 className="text-xl font-semibold mb-2">Recevez le rapport</h3>
-              <p className="text-gray-600">
-                Rapport PDF complet envoyé par email avec analyse détaillée
-              </p>
-            </div>
+            ))}
           </div>
         </div>
       </section>
 
-      {/* Témoignages */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-        <h2 className="text-3xl font-bold text-center text-gray-900 mb-12">
-          Ce que disent nos clients
-        </h2>
-        <div className="grid md:grid-cols-3 gap-8">
-          <div className="card">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-12 h-12 bg-primary-100 rounded-full flex items-center justify-center text-primary-600 font-bold">
-                JD
+      <section className="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
+        <div className="mb-10 text-center">
+          <p className="text-sm font-semibold uppercase tracking-[0.25em] text-primary-700">Témoignages</p>
+          <h2 className="mt-3 text-3xl font-semibold text-slate-900 sm:text-4xl">Ce que disent nos clients</h2>
+        </div>
+        <div className="grid gap-6 md:grid-cols-3">
+          {[
+            { initials: 'JD', name: 'Jean Dupont', role: 'CTO, TechCorp', quote: 'Grâce à CloudDev Fusion, nous avons migré vers AKS en 3 mois et réduit nos coûts de 45%. Le calculateur ROI était très précis.' },
+            { initials: 'SM', name: 'Sophie Martin', role: 'DevOps Lead, InnovaCloud', quote: 'Un outil indispensable pour convaincre notre direction. Les chiffres parlent d’eux-mêmes. Accompagnement top niveau.' },
+            { initials: 'PL', name: 'Pierre Leroux', role: 'Directeur IT, MegaRetail', quote: 'ROI atteint en 8 mois. CloudDev Fusion a géré la migration de A à Z. Je recommande à 100%.' },
+          ].map((item) => (
+            <div key={item.name} className="rounded-[24px] border border-slate-200 bg-white p-7 shadow-sm">
+              <div className="mb-4 flex items-center gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary-100 font-semibold text-primary-700">
+                  {item.initials}
+                </div>
+                <div>
+                  <div className="font-semibold text-slate-900">{item.name}</div>
+                  <div className="text-sm text-slate-500">{item.role}</div>
+                </div>
               </div>
-              <div>
-                <div className="font-semibold">Jean Dupont</div>
-                <div className="text-sm text-gray-500">CTO, TechCorp</div>
-              </div>
+              <p className="text-sm leading-7 text-slate-600">“{item.quote}”</p>
             </div>
-            <p className="text-gray-600 italic">
-              &quot;Grâce à CloudDev Fusion, nous avons migré vers AKS en 3 mois et réduit nos coûts de 45%.
-              Le calculateur ROI était très précis !&quot;
-            </p>
-          </div>
-          <div className="card">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-12 h-12 bg-primary-100 rounded-full flex items-center justify-center text-primary-600 font-bold">
-                SM
-              </div>
-              <div>
-                <div className="font-semibold">Sophie Martin</div>
-                <div className="text-sm text-gray-500">DevOps Lead, InnovaCloud</div>
-              </div>
-            </div>
-            <p className="text-gray-600 italic">
-              &quot;Un outil indispensable pour convaincre notre direction. Les chiffres parlent d&apos;eux-mêmes.
-              Accompagnement top niveau !&quot;
-            </p>
-          </div>
-          <div className="card">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-12 h-12 bg-primary-100 rounded-full flex items-center justify-center text-primary-600 font-bold">
-                PL
-              </div>
-              <div>
-                <div className="font-semibold">Pierre Leroux</div>
-                <div className="text-sm text-gray-500">Directeur IT, MegaRetail</div>
-              </div>
-            </div>
-            <p className="text-gray-600 italic">
-              &quot;ROI atteint en 8 mois. CloudDev Fusion a géré la migration de A à Z.
-              Je recommande à 100% !&quot;
-            </p>
-          </div>
+          ))}
         </div>
       </section>
 
-      {/* CTA Final */}
-      <section className="bg-gradient-to-r from-primary-600 to-primary-800 text-white py-20">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <h2 className="text-4xl font-bold mb-6">
+      <section className="bg-[linear-gradient(135deg,_#001F4D_0%,_#0969F9_100%)] py-20 text-white">
+        <div className="mx-auto max-w-4xl px-4 text-center sm:px-6 lg:px-8">
+          <h2 className="text-3xl font-semibold sm:text-4xl">
             Prêt à découvrir vos économies potentielles ?
           </h2>
-          <p className="text-xl mb-8 text-primary-100">
-            Commencez votre évaluation gratuite dès maintenant. Sans engagement.
+          <p className="mx-auto mt-4 max-w-2xl text-lg text-blue-100">
+            Commencez votre évaluation gratuite dès maintenant. Sans engagement et avec un rapport prêt à partager.
           </p>
-          <Link 
+          <Link
             href="/wizard"
-            className="inline-flex items-center gap-2 bg-white text-primary-600 px-8 py-4 rounded-lg text-lg font-semibold hover:bg-gray-50 transition-colors shadow-lg"
+            className="mt-8 inline-flex items-center gap-2 rounded-2xl bg-white px-8 py-4 text-lg font-semibold text-primary-700 shadow-lg transition hover:-translate-y-0.5 hover:bg-slate-50"
           >
             Démarrer le calculateur
-            <ArrowRight className="w-5 h-5" />
+            <ArrowRight className="h-5 w-5" />
           </Link>
-          <p className="text-sm text-primary-200 mt-6">
+          <p className="mt-6 text-sm text-blue-100">
             ✓ Aucune carte bancaire requise • ✓ Résultats en 5 minutes • ✓ Données sécurisées
           </p>
         </div>

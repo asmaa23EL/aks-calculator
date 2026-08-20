@@ -3,19 +3,65 @@
 @tailwind utilities;
 
 :root {
-  --foreground-rgb: 0, 0, 0;
-  --background-start-rgb: 255, 255, 255;
-  --background-end-rgb: 255, 255, 255;
+  /* Couleurs principales */
+  --sidebar-dark: #002B63;
+  --sidebar-darker: #001F4D;
+  --primary-blue: #0969F9;
+  --primary-blue-hover: #0055D9;
+  --light-blue: #EAF3FF;
+
+  /* Arrière-plans */
+  --background: #F8FAFD;
+  --surface: #FFFFFF;
+  --selected-row: #F1F6FD;
+
+  /* Textes */
+  --text-primary: #071536;
+  --text-secondary: #52617D;
+  --text-muted: #8A96AB;
+
+  /* Bordures */
+  --border: #DCE4EF;
+
+  /* Statuts */
+  --status-orange: #EA580C;
+  --status-orange-bg: #FFF1E5;
+
+  --status-green: #237A3B;
+  --status-green-bg: #E6F4E9;
+
+  --status-blue: #075FE4;
+  --status-blue-bg: #EAF3FF;
+
+  --status-gray: #475569;
+  --status-gray-bg: #F1F5F9;
+
+  /* Activités */
+  --purple: #6D28D9;
+  --purple-bg: #F1E9FF;
+
+  --red: #EF2B2D;
+  --amber: #D97706;
+  --amber-bg: #FFF4DB;
+
+  --foreground-rgb: 15, 23, 42;
+  --background-start-rgb: 248, 251, 255;
+  --background-end-rgb: 238, 246, 255;
+  --brand-blue: var(--primary-blue);
+  --brand-cyan: #23b5d3;
 }
 
 body {
   color: rgb(var(--foreground-rgb));
-  background: linear-gradient(
-      to bottom,
-      transparent,
-      rgb(var(--background-end-rgb))
-    )
-    rgb(var(--background-start-rgb));
+  background: linear-gradient(135deg, var(--background) 0%, #eef6ff 100%);
+}
+
+.brand-gradient {
+  background: linear-gradient(135deg, var(--primary-blue) 0%, var(--brand-cyan) 100%);
+}
+
+.brand-surface {
+  background: linear-gradient(180deg, var(--background) 0%, var(--light-blue) 100%);
 }
 
 @keyframes slideInFromBottom {

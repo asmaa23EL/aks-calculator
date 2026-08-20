@@ -1,16 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import AdminDashboard from '@/components/admin/AdminDashboard';
-import AdminLogoutButton from '@/components/AdminLogoutButton';
-import { buildApiUrl } from '@/utils/api';
-import {
-  BarChart3,
-  Download,
-  LayoutDashboard,
-  Mail,
-  Users,
-} from 'lucide-react';
+import AdminSidebar from '@/components/admin/AdminSidebar';
 
 type AdminView = 'dashboard' | 'leads' | 'emails' | 'stats';
 
@@ -23,8 +16,35 @@ function formatFrenchDate(): string {
   });
 }
 
+const viewLabels: Record<AdminView, string> = {
+  dashboard: 'Tableau de bord',
+  leads: 'Leads',
+  emails: 'Activités',
+  stats: 'Statistiques',
+};
+
 export default function AdminDashboardPage() {
-  const [activeView, setActiveView] = useState<AdminView>('dashboard');
+  const router = useRouter();
+  const [activeView, setActiveView] = useState<AdminView>('leads');
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    fetch('/api/admin/me', { credentials: 'include', cache: 'no-store' })
+      .then((response) => {
+        if (!response.ok) {
+          router.replace('/admin/login');
+          return;
+        }
+        if (isMounted) setIsAuthenticated(true);
+      })
+      .catch(() => router.replace('/admin/login'));
+
+    return () => {
+      isMounted = false;
+    };
+  }, [router]);
 
   const initialStats = {
     totalLeads: 0,
@@ -40,112 +60,43 @@ export default function AdminDashboardPage() {
     emailsSentCount: 0,
   };
 
+  if (!isAuthenticated) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-100 text-sm text-slate-600">
+        Vérification de votre session…
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-100 p-2 md:p-4">
-      <div className="mx-auto max-w-[1500px] rounded-2xl border border-slate-200 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.08)] overflow-hidden">
-        <div className="flex flex-col lg:flex-row min-h-[calc(100vh-2rem)]">
-          <aside className="w-full lg:w-72 bg-gradient-to-b from-[#0f2f66] to-[#0d2551] text-white p-6 flex flex-col">
-            <div className="flex items-center gap-3 pb-6 border-b border-white/20">
-              <img
-                src="/logo.png"
-                alt="CloudDev Fusion Logo"
-                className="h-10 w-auto"
-              />
+      <div className="mx-auto flex min-h-[calc(100vh-2rem)] max-w-[1600px] overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-[0_12px_40px_rgba(15,23,42,0.06)]">
+        <AdminSidebar activeView={activeView} onChangeView={setActiveView} onLogout={() => router.replace('/admin/login')} />
+        <main className="min-w-0 flex-1 overflow-auto bg-slate-50/70">
+          {activeView !== 'leads' && <div className="flex h-16 items-center justify-between border-b border-slate-200 bg-white px-5 md:px-8">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Administration</p>
+              <p className="text-sm text-slate-600">Vue {viewLabels[activeView].toLowerCase()}</p>
+            </div>
+            <div className="flex items-center gap-3 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-900 text-xs font-semibold text-white">A</div>
+              <span className="font-medium">Admin</span>
+            </div>
+          </div>}
+          <div className={activeView === 'leads' ? 'h-full p-0' : 'p-5 md:p-8'}>
+            {activeView !== 'leads' && <header className="mb-6 flex flex-col gap-3 rounded-[20px] border border-slate-200 bg-white p-5 shadow-sm md:flex-row md:items-center md:justify-between">
               <div>
-                <p className="text-lg font-semibold leading-tight">CloudDevFusion</p>
-                <p className="text-[11px] text-blue-100">Excellence Azure & Cloud</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Espace de pilotage</p>
+                <h1 className="mt-1 text-[24px] font-semibold leading-tight text-slate-900">{viewLabels[activeView]}</h1>
+                <p className="mt-1 text-sm text-slate-600">Bienvenue, Admin. Gérez les leads et suivez l’activité commerciale de façon claire.</p>
               </div>
-            </div>
-
-            <p className="text-sm font-semibold text-blue-100 mt-5 mb-2">CloudDevFusion</p>
-            <nav className="space-y-1">
-              <button
-                type="button"
-                onClick={() => setActiveView('dashboard')}
-                className={`w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
-                  activeView === 'dashboard'
-                    ? 'bg-[#2f65f5] text-white font-medium shadow-sm'
-                    : 'text-blue-100 hover:bg-white/10'
-                }`}
-              >
-                <LayoutDashboard size={16} />
-                Tableau de bord
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveView('leads')}
-                className={`w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
-                  activeView === 'leads'
-                    ? 'bg-[#2f65f5] text-white font-medium shadow-sm'
-                    : 'text-blue-100 hover:bg-white/10'
-                }`}
-              >
-                <Users size={16} />
-                Leads
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveView('emails')}
-                className={`w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
-                  activeView === 'emails'
-                    ? 'bg-[#2f65f5] text-white font-medium shadow-sm'
-                    : 'text-blue-100 hover:bg-white/10'
-                }`}
-              >
-                <Mail size={16} />
-                E-mails
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveView('stats')}
-                className={`w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
-                  activeView === 'stats'
-                    ? 'bg-[#2f65f5] text-white font-medium shadow-sm'
-                    : 'text-blue-100 hover:bg-white/10'
-                }`}
-              >
-                <BarChart3 size={16} />
-                Statistiques
-              </button>
-              <a
-                className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-blue-100 hover:bg-white/10 transition-colors"
-                href={buildApiUrl('/api/admin/leads/export?search=&status=all')}
-              >
-                <Download size={16} />
-                Export CSV
-              </a>
-            </nav>
-
-            <div className="mt-auto pt-6 border-t border-white/20 space-y-4">
-              <AdminLogoutButton className="w-full rounded-lg border border-white/35 px-4 py-2 text-sm font-medium text-white hover:bg-white/10 transition-colors" />
-              <p className="text-[11px] leading-relaxed text-blue-100/90">© 2025 CloudDevFusion<br />Tous droits réservés.</p>
-            </div>
-          </aside>
-
-          <main className="flex-1 bg-slate-50 overflow-auto">
-            <div className="h-14 border-b border-slate-200 bg-white px-5 md:px-8 flex items-center justify-end gap-4">
-              <div className="flex items-center gap-2 text-sm text-slate-700">
-                <div className="h-7 w-7 rounded-full bg-[#2f65f5] text-white flex items-center justify-center text-xs font-semibold">A</div>
-                <span>Admin</span>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                {formatFrenchDate()}
               </div>
-            </div>
-            <div className="p-5 md:p-8">
-              <header className="flex flex-col md:flex-row md:items-start md:justify-between gap-3 mb-6">
-                <div>
-                  <h1 className="text-[34px] leading-tight font-bold text-slate-900">
-                    {activeView === 'dashboard' && 'Tableau de bord'}
-                    {activeView === 'leads' && 'Leads'}
-                    {activeView === 'emails' && 'E-mails envoyes'}
-                    {activeView === 'stats' && 'Statistiques'}
-                  </h1>
-                  <p className="text-slate-600 mt-1">Bienvenue, Admin</p>
-                </div>
-                <p className="text-sm text-slate-500 capitalize">{formatFrenchDate()}</p>
-              </header>
-              <AdminDashboard activeView={activeView} initialLeads={[]} initialStats={initialStats} />
-            </div>
-          </main>
-        </div>
+            </header>}
+            <AdminDashboard activeView={activeView} initialLeads={[]} initialStats={initialStats} />
+          </div>
+        </main>
       </div>
     </div>
   );

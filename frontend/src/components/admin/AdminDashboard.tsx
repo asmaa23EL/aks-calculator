@@ -1,22 +1,15 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { BadgeCheck, BarChart3, FileText, TrendingUp, Users2 } from 'lucide-react';
+import LeadsTable from '@/components/admin/LeadsTable';
+import LeadDetailsPanel from '@/components/admin/LeadDetailsPanel';
+import StatusBadge from '@/components/admin/StatusBadge';
 import { buildApiUrl } from '@/utils/api';
-import {
-  CalendarDays,
-  CircleUserRound,
-  Download,
-  FileText,
-  Mail,
-  MessageSquare,
-  MoreHorizontal,
-  PhoneCall,
-  Search,
-  TrendingUp,
-  UserRound,
-} from 'lucide-react';
 
-type LeadStatusFilter = 'all' | 'new' | 'pdf_sent' | 'contacted';
+export type LeadStatus = 'NOUVEAU' | 'A_CONTACTER' | 'CONTACTE' | 'A_RELANCER' | 'RDV_PLANIFIE' | 'INTERESSE' | 'NON_INTERESSE' | 'CLIENT' | 'PERDU';
+
+type LeadStatusFilter = 'all' | 'new' | 'pdf_sent' | 'contacted' | 'relance' | 'rdv' | 'interested' | 'not_interested' | 'client' | 'lost';
 
 type AdminLead = {
   id: number;
@@ -30,6 +23,10 @@ type AdminLead = {
   pdfSent: boolean;
   contacted: boolean;
   statusNote: string | null;
+  status: string;
+  note: string | null;
+  nextActionDate: string | null;
+  nextAction: string | null;
   lastContactedAt: string | null;
   lastPdfSentAt: string | null;
   emailCount: number;
@@ -60,56 +57,7 @@ type AdminDashboardProps = {
   initialStats: AdminStats;
 };
 
-function formatDate(dateValue: string | null): string {
-  if (!dateValue) {
-    return '-';
-  }
-  const date = new Date(dateValue);
-  if (Number.isNaN(date.getTime())) {
-    return '-';
-  }
-  return date.toLocaleString('fr-FR');
-}
-
-function formatShortDate(dateValue: string | null): string {
-  if (!dateValue) {
-    return '-';
-  }
-  const date = new Date(dateValue);
-  if (Number.isNaN(date.getTime())) {
-    return '-';
-  }
-  return date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
-}
-
-function getStatusBadge(lead: AdminLead): { text: string; className: string } {
-  if (lead.contacted) {
-    return {
-      text: 'Contacte',
-      className: 'bg-green-100 text-green-800 border-green-300',
-    };
-  }
-  if (lead.pdfSent) {
-    return {
-      text: 'PDF envoye',
-      className: 'bg-blue-100 text-blue-800 border-blue-300',
-    };
-  }
-  return {
-    text: 'Nouveau',
-    className: 'bg-amber-100 text-amber-800 border-amber-300',
-  };
-}
-
-function getCurrentStatus(lead: AdminLead): string {
-  if (lead.contacted) {
-    return 'Contacte';
-  }
-  if (lead.pdfSent) {
-    return 'PDF envoye';
-  }
-  return 'Nouveau';
-}
+type LeadDetailTab = 'informations' | 'activites' | 'simulation' | 'pdf';
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat('fr-FR').format(value);
@@ -120,523 +68,548 @@ export default function AdminDashboard({ activeView, initialLeads, initialStats 
   const [stats, setStats] = useState<AdminStats>(initialStats);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<LeadStatusFilter>('all');
+  const [sourceFilter, setSourceFilter] = useState('all');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [selectedLeadId, setSelectedLeadId] = useState<number | null>(initialLeads[0]?.id ?? null);
-  const [editingNote, setEditingNote] = useState('');
-  const [isSavingNote, setIsSavingNote] = useState(false);
-  const [emailSubject, setEmailSubject] = useState('');
-  const [emailBody, setEmailBody] = useState('');
-  const [isSendingEmail, setIsSendingEmail] = useState(false);
-  const [successMessage, setSuccessMessage] = useState('');
+  const [isPanelOpen, setIsPanelOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<LeadDetailTab>('informations');
+  const [pageIndex, setPageIndex] = useState(1);
+  const [isAddLeadOpen, setIsAddLeadOpen] = useState(false);
+  const [isActivityOpen, setIsActivityOpen] = useState(false);
+  const [isSavingActivity, setIsSavingActivity] = useState(false);
+  const [activityError, setActivityError] = useState('');
+  const [activityForm, setActivityForm] = useState({ type: 'APPEL', note: '', nextAction: '', nextActionDate: '' });
+  const [isAddingLead, setIsAddingLead] = useState(false);
+  const [addLeadError, setAddLeadError] = useState('');
+  const [addLeadForm, setAddLeadForm] = useState({
+    prenom: '',
+    nom: '',
+    email: '',
+    societe: '',
+    role: '',
+    telephone: '',
+    note: '',
+    status: 'NOUVEAU' as string,
+  });
 
-  const selectedLead = useMemo(
-    () => leads.find((lead) => lead.id === selectedLeadId) || null,
-    [leads, selectedLeadId]
+  const selectedLead = useMemo(() => leads.find((lead) => lead.id === selectedLeadId) || null, [leads, selectedLeadId]);
+  const leadsPerPage = 6;
+  const pageCount = Math.max(1, Math.ceil(leads.length / leadsPerPage));
+  const visibleLeads = useMemo(
+    () => leads.slice((pageIndex - 1) * leadsPerPage, pageIndex * leadsPerPage),
+    [leads, pageIndex],
   );
 
-  const emailedLeads = useMemo(() => leads.filter((lead) => lead.emailCount > 0), [leads]);
-  const totalEmailsSent = useMemo(() => stats.emailsSentCount || emailedLeads.reduce((total, lead) => total + lead.emailCount, 0), [emailedLeads, stats.emailsSentCount]);
+  useEffect(() => {
+    if (pageIndex > pageCount) setPageIndex(pageCount);
+  }, [pageCount, pageIndex]);
 
   const loadDashboard = useCallback(async () => {
     setIsLoading(true);
     setError('');
-    setSuccessMessage('');
     try {
       const query = new URLSearchParams();
-      if (search.trim()) {
-        query.set('search', search.trim());
-      }
+      if (search.trim()) query.set('search', search.trim());
       if (statusFilter !== 'all') {
-        query.set('status', statusFilter);
+        const statusMap: Record<LeadStatusFilter, string> = {
+          all: 'all',
+          new: 'new',
+          pdf_sent: 'pdf_sent',
+          contacted: 'contacted',
+          relance: 'relance',
+          rdv: 'rdv',
+          interested: 'interested',
+          not_interested: 'not_interested',
+          client: 'client',
+          lost: 'lost',
+        };
+        query.set('status', statusMap[statusFilter]);
       }
+      if (sourceFilter !== 'all') query.set('source', sourceFilter);
 
       const [leadsResponse, statsResponse] = await Promise.all([
-        fetch(buildApiUrl(`/api/admin/leads?${query.toString()}`), { credentials: 'include' }),
-        fetch(buildApiUrl('/api/admin/stats'), { credentials: 'include' }),
+        fetch(buildApiUrl(`/api/admin/leads?${query.toString()}`), { credentials: 'include', headers: { Accept: 'application/json' } }),
+        fetch(buildApiUrl('/api/admin/stats'), { credentials: 'include', headers: { Accept: 'application/json' } }),
       ]);
 
-      const leadsPayload = (await leadsResponse.json().catch(() => null)) as
-        | { leads?: AdminLead[]; error?: string }
-        | null;
-      const statsPayload = (await statsResponse.json().catch(() => null)) as
-        | { stats?: AdminStats; error?: string }
-        | null;
+      const leadsPayload = (await leadsResponse.json().catch(() => null)) as { leads?: AdminLead[]; error?: string } | null;
+      const statsPayload = (await statsResponse.json().catch(() => null)) as { stats?: AdminStats; error?: string } | null;
 
-      if (!leadsResponse.ok || !statsResponse.ok || !leadsPayload?.leads || !statsPayload?.stats) {
-        setError(leadsPayload?.error || statsPayload?.error || 'Chargement impossible');
+      const normalizedLeads = Array.isArray(leadsPayload?.leads)
+        ? leadsPayload.leads
+        : Array.isArray((leadsPayload as { data?: AdminLead[] } | null)?.data)
+          ? (leadsPayload as { data?: AdminLead[] }).data ?? []
+          : [];
+
+      const normalizedStats = statsPayload?.stats ?? (statsPayload as { data?: AdminStats } | null)?.data ?? null;
+
+      if (!leadsResponse.ok || !statsResponse.ok) {
+        const fallbackLeads = normalizedLeads.length > 0 ? normalizedLeads : initialLeads;
+        const fallbackStats = normalizedStats ?? initialStats;
+        setLeads(fallbackLeads);
+        setStats(fallbackStats);
+        if (!fallbackLeads.some((lead) => lead.id === selectedLeadId)) {
+          setSelectedLeadId(fallbackLeads[0]?.id ?? null);
+        }
+        if (!fallbackLeads.length && !fallbackStats.totalLeads) {
+          setError('Aucune donnée disponible pour l’instant');
+        }
         return;
       }
 
-      const nextLeads = leadsPayload.leads;
-      const nextStats = statsPayload.stats;
+      if (!normalizedLeads.length && !normalizedStats) {
+        setError('Aucune donnée disponible pour l’instant');
+        return;
+      }
 
-      setLeads(nextLeads);
-      setStats(nextStats);
-      setSelectedLeadId((previous) =>
-        nextLeads.some((lead) => lead.id === previous) ? previous || null : nextLeads[0]?.id ?? null
-      );
-    } catch (requestError) {
-      console.error('Dashboard load error:', requestError);
-      setError('Erreur reseau pendant le chargement');
+      setLeads(normalizedLeads);
+      setStats(normalizedStats ?? initialStats);
+      if (!normalizedLeads.some((lead) => lead.id === selectedLeadId)) {
+        setSelectedLeadId(normalizedLeads[0]?.id ?? null);
+      }
+    } catch {
+      setError('Erreur réseau pendant le chargement');
     } finally {
       setIsLoading(false);
     }
-  }, [search, statusFilter]);
+  }, [search, selectedLeadId, sourceFilter, statusFilter]);
 
   useEffect(() => {
-    setEditingNote(selectedLead?.statusNote || '');
-  }, [selectedLeadId, selectedLead?.statusNote]);
+    void loadDashboard();
+  }, [loadDashboard]);
 
-  useEffect(() => {
-    if (initialLeads.length === 0) {
-      void loadDashboard();
-    }
-  }, [initialLeads.length, loadDashboard]);
-
-  const updateLead = async (leadId: number, payload: { pdfSent?: boolean; contacted?: boolean; statusNote?: string | null }) => {
-    const response = await fetch(buildApiUrl(`/api/admin/leads/${leadId}`), {
-      method: 'PATCH',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    if (!response.ok) {
-      const body = (await response.json().catch(() => null)) as { error?: string } | null;
-      throw new Error(body?.error || 'Mise a jour impossible');
-    }
-  };
-
-  const handleTogglePdf = async (lead: AdminLead) => {
-    try {
-      await updateLead(lead.id, { pdfSent: !lead.pdfSent });
-      await loadDashboard();
-      setSuccessMessage('Statut PDF mis a jour');
-    } catch (requestError) {
-      const message = requestError instanceof Error ? requestError.message : 'Erreur';
-      setError(message);
-    }
-  };
-
-  const handleSaveNote = async () => {
-    if (!selectedLead) {
-      return;
-    }
-    setIsSavingNote(true);
-    try {
-      await updateLead(selectedLead.id, { statusNote: editingNote || null });
-      await loadDashboard();
-      setSuccessMessage('Note enregistree avec succes');
-    } catch (requestError) {
-      const message = requestError instanceof Error ? requestError.message : 'Erreur';
-      setError(message);
-    } finally {
-      setIsSavingNote(false);
-    }
-  };
-
-  const handlePrepareEmail = (lead: AdminLead) => {
+  const handleSelectLead = (lead: AdminLead) => {
     setSelectedLeadId(lead.id);
-    setEmailSubject(`Suivi de votre simulation ROI AKS - ${lead.societe || lead.nom}`);
-    setEmailBody(
-      `Bonjour ${lead.prenom},\n\nMerci pour votre simulation ROI AKS. Souhaitez-vous planifier un echange de 20 minutes pour analyser vos resultats et vos gains potentiels ?\n\nBien cordialement,\nCloudDev Fusion`
-    );
+    setIsPanelOpen(true);
+    setActiveTab('informations');
   };
 
-  const selectLeadAndShowDetails = (lead: AdminLead) => {
-    handlePrepareEmail(lead);
-    setEditingNote(lead.statusNote || '');
-    requestAnimationFrame(() => {
-      const panel = document.getElementById('lead-details-section');
-      if (panel) {
-        panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
+  const handleOpenAddLead = () => {
+    setAddLeadError('');
+    setAddLeadForm({
+      prenom: '',
+      nom: '',
+      email: '',
+      societe: '',
+      role: '',
+      telephone: '',
+      note: '',
+      status: 'NOUVEAU',
     });
+    setIsAddLeadOpen(true);
   };
 
-  const handleSendEmail = async () => {
-    if (!selectedLead || !emailSubject.trim() || !emailBody.trim()) {
-      setError('Sujet et contenu e-mail requis');
-      return;
-    }
-    setIsSendingEmail(true);
-    setError('');
-    setSuccessMessage('');
+  const handleOpenActivity = () => {
+    setActivityError('');
+    setActivityForm({ type: 'APPEL', note: '', nextAction: selectedLead?.nextAction || '', nextActionDate: selectedLead?.nextActionDate?.slice(0, 10) || '' });
+    setIsActivityOpen(true);
+  };
+
+  const handleActivitySubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selectedLead) return;
+    setIsSavingActivity(true);
+    setActivityError('');
     try {
-      const response = await fetch(buildApiUrl(`/api/admin/leads/${selectedLead.id}/email`), {
+      const activityLabels: Record<string, string> = {
+        APPEL: 'Appel', EMAIL: 'E-mail', RENDEZ_VOUS: 'Rendez-vous', LINKEDIN: 'LinkedIn', NOTE: 'Note', AUTRE: 'Autre',
+      };
+      await handleUpdateLead(selectedLead.id, {
+        statusNote: `${activityLabels[activityForm.type]} : ${activityForm.note}`,
+        contacted: ['APPEL', 'EMAIL', 'RENDEZ_VOUS', 'LINKEDIN'].includes(activityForm.type) ? true : selectedLead.contacted,
+        nextAction: activityForm.nextAction || null,
+        nextActionDate: activityForm.nextActionDate || null,
+      });
+      setIsActivityOpen(false);
+      setActiveTab('activites');
+    } catch (error) {
+      setActivityError(error instanceof Error ? error.message : 'Impossible d’enregistrer l’activité');
+    } finally {
+      setIsSavingActivity(false);
+    }
+  };
+
+  const handleAddLeadSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIsAddingLead(true);
+    setAddLeadError('');
+
+    try {
+      const response = await fetch(buildApiUrl('/api/admin/leads'), {
         method: 'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({
-          subject: emailSubject,
-          body: emailBody,
+          prenom: addLeadForm.prenom,
+          nom: addLeadForm.nom,
+          email: addLeadForm.email,
+          societe: addLeadForm.societe,
+          role: addLeadForm.role,
+          telephone: addLeadForm.telephone,
+          note: addLeadForm.note,
+          status: addLeadForm.status,
         }),
       });
 
-      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      const payload = await response.json().catch(() => null) as { error?: string; success?: boolean } | null;
+
       if (!response.ok) {
-        setError(payload?.error || 'Envoi impossible');
-        return;
+        throw new Error(payload?.error || 'Impossible d’ajouter le lead');
       }
+
+      setIsAddLeadOpen(false);
       await loadDashboard();
-      setSuccessMessage('Relance e-mail envoyee');
     } catch (requestError) {
-      console.error('Manual email error:', requestError);
-      setError('Erreur reseau pendant la relance e-mail');
+      setAddLeadError(requestError instanceof Error ? requestError.message : 'Impossible d’ajouter le lead');
     } finally {
-      setIsSendingEmail(false);
+      setIsAddingLead(false);
     }
   };
 
-  const showDashboard = activeView === 'dashboard';
-  const showLeads = activeView === 'leads';
-  const showEmails = activeView === 'emails';
-  const showStats = activeView === 'stats';
+  const handleUpdateLead = async (leadId: number, updates: Partial<AdminLead>) => {
+    const response = await fetch(buildApiUrl(`/api/admin/leads/${leadId}`), {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(updates),
+    });
 
-  return (
-    <div className="space-y-4">
-      {(showDashboard || showStats) && (
-      <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-[0_8px_20px_rgba(15,23,42,0.05)]">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center">
-              <UserRound size={18} />
-            </div>
-            <div>
-              <p className="text-xs text-slate-500">Leads totaux</p>
-              <p className="text-3xl font-semibold leading-tight text-slate-900">{formatNumber(stats.totalLeads)}</p>
-              <p className="text-[11px] text-emerald-600">+ {formatNumber(stats.leadsThisMonth)} ce mois</p>
-            </div>
-          </div>
-        </div>
-        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-[0_8px_20px_rgba(15,23,42,0.05)]">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center">
-              <FileText size={18} />
-            </div>
-            <div>
-              <p className="text-xs text-slate-500">PDF envoyes</p>
-              <p className="text-3xl font-semibold leading-tight text-slate-900">{formatNumber(stats.pdfSentCount)}</p>
-              <p className="text-[11px] text-emerald-600">
-                {stats.totalLeads > 0 ? `${Math.round((stats.pdfSentCount / stats.totalLeads) * 100)}% du total` : '0% du total'}
-              </p>
-            </div>
-          </div>
-        </div>
-        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-[0_8px_20px_rgba(15,23,42,0.05)]">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center">
-              <TrendingUp size={18} />
-            </div>
-            <div>
-              <p className="text-xs text-slate-500">Synchronises au CRM</p>
-              <p className="text-3xl font-semibold leading-tight text-slate-900">{formatNumber(stats.contactedCount)}</p>
-              <p className="text-[11px] text-amber-600">
-                {formatNumber(Math.max(stats.totalLeads - stats.contactedCount, 0))} en attente
-              </p>
-            </div>
-          </div>
-        </div>
-        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-[0_8px_20px_rgba(15,23,42,0.05)]">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-full bg-violet-50 text-violet-600 flex items-center justify-center">
-              <TrendingUp size={18} />
-            </div>
-            <div>
-              <p className="text-xs text-slate-500">Taux de conversion</p>
-              <p className="text-3xl font-semibold leading-tight text-slate-900">
-                {stats.conversionRate !== null ? `${stats.conversionRate}%` : '0%'}
-              </p>
-              <p className="text-[11px] text-blue-600">0% depuis le debut</p>
-            </div>
-          </div>
-        </div>
-      </section>
-      )}
+    if (!response.ok) {
+      throw new Error('Impossible de mettre à jour le lead');
+    }
 
-      {(showDashboard || showLeads) && (
-      <section className="bg-white rounded-xl border border-slate-200 shadow-[0_8px_20px_rgba(15,23,42,0.05)] overflow-hidden">
-        <div className="px-4 md:px-5 py-4 border-b border-slate-100">
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
-            <h2 className="text-2xl font-semibold text-slate-900">Derniers leads</h2>
-            <div className="flex flex-col md:flex-row gap-2">
-              <div className="relative">
-                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="text"
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Rechercher..."
-                  className="h-10 w-full md:w-56 rounded-lg border border-slate-300 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
+    setLeads((currentLeads) => currentLeads.map((lead) => {
+      if (lead.id !== leadId) {
+        return lead;
+      }
+
+      return {
+        ...lead,
+        ...updates,
+        status: updates.status ?? lead.status,
+        note: typeof updates.note === 'undefined' ? lead.note : updates.note,
+        nextActionDate: typeof updates.nextActionDate === 'undefined' ? lead.nextActionDate : updates.nextActionDate,
+        nextAction: typeof updates.nextAction === 'undefined' ? lead.nextAction : updates.nextAction,
+      };
+    }));
+  };
+
+  const handleOpenMenu = (lead: AdminLead) => {
+    setSelectedLeadId(lead.id);
+    setIsPanelOpen(true);
+    setActiveTab('informations');
+  };
+
+  const handleEmailLead = () => {
+    if (!selectedLead) return;
+    const subject = encodeURIComponent('Suivi de votre simulation ROI AKS');
+    const body = encodeURIComponent(`Bonjour ${selectedLead.prenom},\n\nJe reviens vers vous à la suite de votre simulation ROI AKS. Souhaitez-vous échanger sur vos résultats et les économies potentielles identifiées ?\n\nBien cordialement,\nCloudDev Fusion`);
+    window.location.href = `mailto:${selectedLead.email}?subject=${subject}&body=${body}`;
+  };
+
+  const handleViewPdf = () => {
+    if (!selectedLead) return;
+    window.open(buildApiUrl(`/api/admin/leads/${selectedLead.id}/pdf`), '_blank');
+  };
+
+  const overviewCards = [
+    { label: 'Leads totaux', value: formatNumber(stats.totalLeads), note: `+ ${formatNumber(stats.leadsThisMonth)} ce mois`, icon: Users2, accent: 'bg-[linear-gradient(135deg,_#EAF3FF_0%,_#DCEEFF_100%)] text-primary-700' },
+    { label: 'PDF envoyés', value: formatNumber(stats.pdfSentCount), note: `${Math.round((stats.pdfSentCount / Math.max(stats.totalLeads, 1)) * 100)}% du total`, icon: FileText, accent: 'bg-[linear-gradient(135deg,_#E6F4E9_0%,_#DDF5E5_100%)] text-emerald-700' },
+    { label: 'Synchronisés au CRM', value: formatNumber(stats.contactedCount), note: `${formatNumber(Math.max(stats.totalLeads - stats.contactedCount, 0))} en attente`, icon: BadgeCheck, accent: 'bg-[linear-gradient(135deg,_#F1E9FF_0%,_#E8D9FF_100%)] text-violet-700' },
+    { label: 'Taux de conversion', value: stats.conversionRate !== null ? `${stats.conversionRate}%` : '0%', note: 'Métrique globale', icon: TrendingUp, accent: 'bg-[linear-gradient(135deg,_#FFF4DB_0%,_#FFEBCF_100%)] text-amber-700' },
+  ];
+
+  const pipelineItems = [
+    { label: 'Nouveaux', statuses: ['NOUVEAU'], color: 'bg-blue-500', text: 'text-blue-700', surface: 'bg-blue-50' },
+    { label: 'À contacter', statuses: ['A_CONTACTER', 'A_RELANCER'], color: 'bg-amber-500', text: 'text-amber-700', surface: 'bg-amber-50' },
+    { label: 'En discussion', statuses: ['CONTACTE', 'RDV_PLANIFIE', 'INTERESSE'], color: 'bg-violet-500', text: 'text-violet-700', surface: 'bg-violet-50' },
+    { label: 'Clients', statuses: ['CLIENT'], color: 'bg-emerald-500', text: 'text-emerald-700', surface: 'bg-emerald-50' },
+  ].map((item) => ({ ...item, count: leads.filter((lead) => item.statuses.includes(lead.status)).length }));
+
+  const recentLeads = [...leads]
+    .sort((left, right) => new Date(right.submittedAt).getTime() - new Date(left.submittedAt).getTime())
+    .slice(0, 5);
+
+  if (activeView === 'dashboard') {
+    return (
+      <div className="space-y-4">
+        <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {overviewCards.map((item) => {
+            const Icon = item.icon;
+            return (
+              <div key={item.label} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-slate-500">{item.label}</p>
+                    <p className="mt-2 text-3xl font-bold tracking-tight text-slate-900">{item.value}</p>
+                  </div>
+                  <div className={`inline-flex rounded-xl ${item.accent} p-2.5`}><Icon size={18} /></div>
+                </div>
+                <p className="mt-3 border-t border-slate-100 pt-3 text-xs font-medium text-slate-500">{item.note}</p>
               </div>
-              <select
-                value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value as LeadStatusFilter)}
-                className="h-10 rounded-lg border border-slate-300 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              >
-                <option value="all">Tous les statuts</option>
-                <option value="new">Nouveaux</option>
-                <option value="pdf_sent">PDF envoye</option>
-                <option value="contacted">Contacte</option>
-              </select>
-              <button
-                type="button"
-                className="h-10 rounded-lg border border-slate-300 px-4 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                onClick={loadDashboard}
-                disabled={isLoading}
-              >
-                {isLoading ? 'Chargement...' : 'Filtrer'}
-              </button>
-              <a
-                href={buildApiUrl(`/api/admin/leads/export?search=${encodeURIComponent(search)}&status=${encodeURIComponent(
-                  statusFilter
-                )}`)}
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-300 px-4 text-sm font-medium text-slate-800 hover:bg-slate-50 transition-colors"
-              >
-                <Download size={14} />
-                Exporter CSV
-              </a>
-            </div>
-          </div>
-          {error && <p className="text-sm text-red-600 mt-3">{error}</p>}
-        </div>
+            );
+          })}
+        </section>
 
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="bg-slate-50 text-slate-600">
-              <tr className="text-left">
-                <th className="px-4 py-3 font-medium">Nom</th>
-                <th className="px-4 py-3 font-medium">Societe</th>
-                <th className="px-4 py-3 font-medium">E-mail</th>
-                <th className="px-4 py-3 font-medium">Role</th>
-                <th className="px-4 py-3 font-medium">Statut</th>
-                <th className="px-4 py-3 font-medium">Date</th>
-                <th className="px-4 py-3 font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {leads.map((lead) => {
-                const badge = getStatusBadge(lead);
-                const isSelected = selectedLeadId === lead.id;
+        <section className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div>
+              <h3 className="font-semibold text-slate-900">Pipeline commercial</h3>
+              <p className="mt-1 text-sm text-slate-500">Répartition actuelle de vos leads</p>
+            </div>
+            <div className="mt-5 space-y-4">
+              {pipelineItems.map((item) => {
+                const percentage = stats.totalLeads ? Math.round((item.count / stats.totalLeads) * 100) : 0;
                 return (
-                  <tr key={lead.id} className={`border-t border-slate-100 ${isSelected ? 'bg-blue-50/40' : ''}`}>
-                    <td className="px-4 py-3">
-                      <button
-                        type="button"
-                        className={`text-left font-semibold ${isSelected ? 'text-blue-700' : 'text-slate-800 hover:text-blue-700'}`}
-                        onClick={() => selectLeadAndShowDetails(lead)}
-                      >
-                        {lead.prenom} {lead.nom}
-                      </button>
-                    </td>
-                    <td className="px-4 py-3 text-slate-700">{lead.societe || '-'}</td>
-                    <td className="px-4 py-3 text-slate-700">{lead.email}</td>
-                    <td className="px-4 py-3 text-slate-700">{lead.role || '-'}</td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${badge.className}`}>
-                        {badge.text}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-slate-700">{formatShortDate(lead.submittedAt)}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          className="h-8 rounded-md border border-blue-300 bg-blue-50 px-3 text-xs font-medium text-blue-700 hover:bg-blue-100 transition-colors"
-                          onClick={() => selectLeadAndShowDetails(lead)}
-                        >
-                          Voir le lead
-                        </button>
-                        <button
-                          type="button"
-                          className="h-8 w-8 rounded-md border border-slate-300 text-slate-500 hover:bg-slate-50 transition-colors inline-flex items-center justify-center"
-                          onClick={() => selectLeadAndShowDetails(lead)}
-                          aria-label="Plus d'actions"
-                        >
-                          <MoreHorizontal size={14} />
-                        </button>
-                        <button
-                          type="button"
-                          className="h-8 rounded-md border border-blue-300 bg-blue-50 px-2 text-xs font-medium text-blue-700 hover:bg-blue-100 transition-colors"
-                          onClick={() => handleTogglePdf(lead)}
-                        >
-                          PDF
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+                  <div key={item.label}>
+                    <div className="mb-2 flex items-center justify-between text-sm">
+                      <span className="font-medium text-slate-700">{item.label}</span>
+                      <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${item.surface} ${item.text}`}>{item.count} lead{item.count > 1 ? 's' : ''}</span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-slate-100"><div className={`h-full rounded-full ${item.color}`} style={{ width: `${percentage}%` }} /></div>
+                  </div>
                 );
               })}
-            </tbody>
-          </table>
-          {leads.length === 0 && <p className="text-slate-600 px-4 py-8">Aucun lead correspondant.</p>}
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+              <div><h3 className="font-semibold text-slate-900">Derniers leads</h3><p className="mt-1 text-sm text-slate-500">Prospects reçus récemment</p></div>
+              <Users2 size={19} className="text-blue-600" />
+            </div>
+            <div className="divide-y divide-slate-100">
+              {recentLeads.length ? recentLeads.map((lead) => (
+                <div key={lead.id} className="flex items-center justify-between gap-3 px-5 py-3.5 hover:bg-slate-50">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-50 text-xs font-bold text-blue-700">{lead.prenom?.[0]}{lead.nom?.[0]}</div>
+                    <div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-800">{lead.prenom} {lead.nom}</p><p className="truncate text-xs text-slate-500">{lead.societe || lead.email}</p></div>
+                  </div>
+                  <div className="text-right"><StatusBadge status={lead.status} compact /><p className="mt-1 text-xs text-slate-400">{new Date(lead.submittedAt).toLocaleDateString('fr-FR')}</p></div>
+                </div>
+              )) : <p className="px-5 py-10 text-center text-sm text-slate-500">Aucun lead pour le moment.</p>}
+            </div>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  if (activeView === 'stats') {
+    return (
+      <div className="space-y-4">
+        <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {overviewCards.map((item) => {
+            const Icon = item.icon;
+            return (
+              <div key={item.label} className="rounded-[20px] border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+                <div className={`inline-flex rounded-2xl ${item.accent} p-2`}>
+                  <Icon size={16} />
+                </div>
+                <p className="mt-3 text-xs uppercase tracking-[0.2em] text-slate-400">{item.label}</p>
+                <p className="mt-2 text-2xl font-semibold text-slate-900">{item.value}</p>
+                <p className="mt-1 text-sm text-slate-500">{item.note}</p>
+              </div>
+            );
+          })}
+        </section>
+
+        <section>
+          <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <BarChart3 size={16} className="text-primary-600" /> Indicateurs de performance
+            </div>
+            <div className="mt-4 space-y-3">
+              {[
+                { label: 'Leads cette semaine', value: formatNumber(stats.leadsThisWeek) },
+                { label: 'Visites cette semaine', value: formatNumber(stats.visitsThisWeek) },
+                { label: 'Simulations cette semaine', value: formatNumber(stats.simulationsThisWeek) },
+                { label: 'Emails envoyés', value: formatNumber(stats.emailsSentCount) },
+              ].map((item) => (
+                <div key={item.label} className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <span className="text-sm text-slate-600">{item.label}</span>
+                  <span className="font-semibold text-slate-900">{item.value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+        </section>
+      </div>
+    );
+  }
+
+  if (activeView === 'emails') {
+    return (
+      <div className="space-y-4">
+        <section className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-slate-900">Centre d’activités</p>
+              <p className="text-sm text-slate-500">Historique des communications et suivis associés</p>
+            </div>
+            <div className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-700">À jour</div>
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            {[
+              { label: 'Relances à envoyer', value: '12' },
+              { label: 'Emails envoyés', value: formatNumber(stats.emailsSentCount) },
+              { label: 'PDF partagés', value: formatNumber(stats.pdfSentCount) },
+            ].map((item) => (
+              <div key={item.label} className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">{item.label}</p>
+                <p className="mt-2 text-2xl font-semibold text-slate-900">{item.value}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+        <div className="rounded-[24px] border border-slate-200 bg-[linear-gradient(135deg,_#F8FAFD_0%,_#F4F9FF_100%)] p-5 text-sm leading-7 text-slate-600 shadow-sm">
+          Le journal d’activité est prêt à recevoir les prochains événements et suivis de communication.
         </div>
-      </section>
-      )}
+      </div>
+    );
+  }
 
-      {(showDashboard || showLeads) && (
-      <section id="lead-details-section" className="grid grid-cols-1 xl:grid-cols-12 gap-4">
-        <article className="xl:col-span-4 rounded-xl border border-slate-200 bg-white p-4 shadow-[0_8px_20px_rgba(15,23,42,0.05)]">
-          <h3 className="text-xl font-semibold text-slate-900 mb-4">Informations du lead</h3>
-          {!selectedLead && <p className="text-sm text-slate-600">Selectionnez un lead.</p>}
-          {selectedLead && (
-            <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="h-9 w-9 rounded-full bg-blue-600 text-white flex items-center justify-center text-sm font-semibold">
-                  {selectedLead.prenom.charAt(0)}{selectedLead.nom.charAt(0)}
-                </div>
-                <div>
-                  <p className="font-semibold text-slate-900">{selectedLead.prenom} {selectedLead.nom}</p>
-                  <p className="text-xs text-slate-500">{selectedLead.societe || '-'}</p>
-                </div>
-              </div>
-              <div className="space-y-2 text-sm text-slate-700">
-                <p className="flex items-center gap-2"><CircleUserRound size={14} className="text-slate-400" /> Role: {selectedLead.role || '-'}</p>
-                <p className="flex items-center gap-2"><Mail size={14} className="text-slate-400" /> E-mail: {selectedLead.email}</p>
-                <p className="flex items-center gap-2"><PhoneCall size={14} className="text-slate-400" /> Telephone: {selectedLead.telephone || '-'}</p>
-                <p className="flex items-center gap-2"><CalendarDays size={14} className="text-slate-400" /> Date de soumission: {formatDate(selectedLead.submittedAt)}</p>
-                <p className="flex items-center gap-2"><TrendingUp size={14} className="text-slate-400" /> Statut actuel: {getCurrentStatus(selectedLead)}</p>
-                <p className="flex items-center gap-2"><MessageSquare size={14} className="text-slate-400" /> Relances: {selectedLead.emailCount}</p>
-                <p className="flex items-center gap-2"><Download size={14} className="text-slate-400" /> Tentatives PDF: {selectedLead.pdfDownloadCount}</p>
-              </div>
-            </div>
-          )}
-        </article>
-
-        <article className="xl:col-span-8 rounded-xl border border-slate-200 bg-white p-4 shadow-[0_8px_20px_rgba(15,23,42,0.05)]">
-          <h3 className="text-xl font-semibold text-slate-900 mb-4">Relance et notes</h3>
-          {!selectedLead && <p className="text-sm text-slate-600">Selectionnez un lead.</p>}
-          {selectedLead && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Sujet de l&apos;e-mail</label>
-                  <input
-                    className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    value={emailSubject}
-                    onChange={(event) => setEmailSubject(event.target.value)}
-                    placeholder="Sujet de la relance"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Derniere relance</label>
-                  <p className="h-10 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-600 flex items-center">
-                    {formatDate(selectedLead.lastEmailAt)}
-                  </p>
-                </div>
-              </div>
-
+  return (
+    <div className="h-full min-h-0">
+      {error ? <div className="rounded-[16px] border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{error}</div> : null}
+      {isActivityOpen && selectedLead ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm">
+          <form onSubmit={handleActivitySubmit} className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Message</label>
-                <textarea
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm min-h-[110px] focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  value={emailBody}
-                  onChange={(event) => setEmailBody(event.target.value)}
-                  placeholder="Contenu de l'e-mail"
-                />
-                <button
-                  type="button"
-                  className="mt-2 w-full h-10 rounded-lg bg-gradient-to-r from-[#2f65f5] to-[#1e55ea] text-white text-sm font-semibold hover:opacity-95 transition-opacity disabled:opacity-60 disabled:cursor-not-allowed"
-                  onClick={handleSendEmail}
-                  disabled={isSendingEmail}
-                >
-                  {isSendingEmail ? 'Envoi...' : 'Envoyer la relance'}
-                </button>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Nouvelle activité</p>
+                <h3 className="mt-1 text-xl font-semibold text-slate-900">{selectedLead.prenom} {selectedLead.nom}</h3>
               </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Note commerciale</label>
-                <textarea
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm min-h-[90px] focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  value={editingNote}
-                  onChange={(event) => setEditingNote(event.target.value)}
-                  placeholder="Ajoutez une note commerciale..."
-                />
-                <button
-                  type="button"
-                  className="mt-2 h-10 rounded-lg border border-slate-300 px-4 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                  onClick={handleSaveNote}
-                  disabled={isSavingNote}
-                >
-                  {isSavingNote ? 'Sauvegarde...' : 'Enregistrer la note'}
-                </button>
-              </div>
-
+              <button type="button" onClick={() => setIsActivityOpen(false)} className="rounded-full p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700">✕</button>
             </div>
-          )}
-        </article>
-      </section>
-      )}
-
-      {showEmails && (
-        <section className="space-y-4">
-          <article className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-            Tous les e-mails envoyes sont suivis ici. Total envoye: {formatNumber(totalEmailsSent)}.
-          </article>
-
-          <article className="bg-white rounded-xl border border-slate-200 shadow-[0_8px_20px_rgba(15,23,42,0.05)] overflow-hidden">
-            <div className="px-4 py-4 border-b border-slate-100">
-              <h2 className="text-2xl font-semibold text-slate-900">Historique des e-mails envoyes</h2>
+            <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              <label className="text-sm font-medium text-slate-700 sm:col-span-2">Type d’activité
+                <select value={activityForm.type} onChange={(event) => setActivityForm((current) => ({ ...current, type: event.target.value }))} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                  <option value="APPEL">Appel</option><option value="EMAIL">E-mail</option><option value="RENDEZ_VOUS">Rendez-vous</option><option value="LINKEDIN">LinkedIn</option><option value="NOTE">Note</option><option value="AUTRE">Autre</option>
+                </select>
+              </label>
+              <label className="text-sm font-medium text-slate-700 sm:col-span-2">Compte rendu
+                <textarea required rows={4} value={activityForm.note} onChange={(event) => setActivityForm((current) => ({ ...current, note: event.target.value }))} placeholder="Ex. Appel sans réponse, message laissé…" className="mt-1.5 w-full resize-none rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+              </label>
+              <label className="text-sm font-medium text-slate-700">Prochaine action
+                <select value={activityForm.nextAction} onChange={(event) => setActivityForm((current) => ({ ...current, nextAction: event.target.value }))} className="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-blue-500">
+                  <option value="">Aucune</option><option value="Appeler">Appeler</option><option value="Envoyer un e-mail">Envoyer un e-mail</option><option value="Planifier un rendez-vous">Planifier un rendez-vous</option><option value="Contacter sur LinkedIn">Contacter sur LinkedIn</option><option value="Relancer">Relancer</option>
+                </select>
+              </label>
+              <label className="text-sm font-medium text-slate-700">Date prévue
+                <input type="date" value={activityForm.nextActionDate} onChange={(event) => setActivityForm((current) => ({ ...current, nextActionDate: event.target.value }))} className="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-blue-500" />
+              </label>
             </div>
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead className="bg-slate-50 text-slate-600">
-                  <tr className="text-left">
-                    <th className="px-4 py-3 font-medium">Lead</th>
-                    <th className="px-4 py-3 font-medium">E-mail</th>
-                    <th className="px-4 py-3 font-medium">Nb relances</th>
-                    <th className="px-4 py-3 font-medium">Dernier envoi</th>
-                    <th className="px-4 py-3 font-medium">Statut</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {emailedLeads.map((lead) => (
-                    <tr key={lead.id} className="border-t border-slate-100">
-                      <td className="px-4 py-3 font-medium text-slate-800">{lead.prenom} {lead.nom}</td>
-                      <td className="px-4 py-3 text-slate-700">{lead.email}</td>
-                      <td className="px-4 py-3 text-slate-700">{formatNumber(lead.emailCount)}</td>
-                      <td className="px-4 py-3 text-slate-700">{formatDate(lead.lastEmailAt)}</td>
-                      <td className="px-4 py-3 text-slate-700">{getCurrentStatus(lead)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {emailedLeads.length === 0 && (
-                <p className="text-slate-600 px-4 py-8">Aucun e-mail envoye pour le moment.</p>
-              )}
+            {activityError && <p className="mt-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{activityError}</p>}
+            <div className="mt-6 flex justify-end gap-3">
+              <button type="button" onClick={() => setIsActivityOpen(false)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50">Annuler</button>
+              <button type="submit" disabled={isSavingActivity} className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60">{isSavingActivity ? 'Enregistrement…' : 'Enregistrer l’activité'}</button>
             </div>
-          </article>
-        </section>
-      )}
+          </form>
+        </div>
+      ) : null}
+      {isAddLeadOpen ? (
+        <div className="mb-4 rounded-[20px] border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-semibold text-slate-900">Ajouter un lead</h3>
+              <p className="mt-1 text-sm text-slate-500">Créez rapidement un nouveau prospect avec ses coordonnées de base.</p>
+            </div>
+            <button type="button" onClick={() => setIsAddLeadOpen(false)} className="rounded-full p-2 text-slate-500 transition hover:bg-slate-100">
+              ✕
+            </button>
+          </div>
 
-      {showStats && (
-        <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-[0_8px_20px_rgba(15,23,42,0.05)]">
-            <p className="text-sm text-slate-500">Personnes ayant essaye de telecharger le PDF</p>
-            <p className="text-3xl font-semibold text-slate-900 mt-2">{formatNumber(stats.pdfDownloadAttemptCount)}</p>
-            <p className="text-xs text-slate-500 mt-1">
-              {formatNumber(stats.pdfDownloadAttemptTotal)} tentative(s) au total
-            </p>
-          </article>
-          <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-[0_8px_20px_rgba(15,23,42,0.05)]">
-            <p className="text-sm text-slate-500">Total e-mails envoyes</p>
-            <p className="text-3xl font-semibold text-slate-900 mt-2">{formatNumber(totalEmailsSent)}</p>
-            <p className="text-xs text-slate-500 mt-1">Tous leads confondus</p>
-          </article>
-          <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-[0_8px_20px_rgba(15,23,42,0.05)]">
-            <p className="text-sm text-slate-500">Leads avec au moins un e-mail</p>
-            <p className="text-3xl font-semibold text-slate-900 mt-2">{formatNumber(emailedLeads.length)}</p>
-            <p className="text-xs text-slate-500 mt-1">Suivi commercial actif</p>
-          </article>
-        </section>
-      )}
+          <form onSubmit={handleAddLeadSubmit} className="mt-4 grid gap-4 md:grid-cols-2">
+            <label className="text-sm text-slate-600">
+              <span className="mb-1 block font-medium">Prénom</span>
+              <input required value={addLeadForm.prenom} onChange={(event) => setAddLeadForm((current) => ({ ...current, prenom: event.target.value }))} className="w-full rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-primary-500" />
+            </label>
+            <label className="text-sm text-slate-600">
+              <span className="mb-1 block font-medium">Nom</span>
+              <input required value={addLeadForm.nom} onChange={(event) => setAddLeadForm((current) => ({ ...current, nom: event.target.value }))} className="w-full rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-primary-500" />
+            </label>
+            <label className="text-sm text-slate-600">
+              <span className="mb-1 block font-medium">Email</span>
+              <input required type="email" value={addLeadForm.email} onChange={(event) => setAddLeadForm((current) => ({ ...current, email: event.target.value }))} className="w-full rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-primary-500" />
+            </label>
+            <label className="text-sm text-slate-600">
+              <span className="mb-1 block font-medium">Société</span>
+              <input value={addLeadForm.societe} onChange={(event) => setAddLeadForm((current) => ({ ...current, societe: event.target.value }))} className="w-full rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-primary-500" />
+            </label>
+            <label className="text-sm text-slate-600">
+              <span className="mb-1 block font-medium">Rôle</span>
+              <input value={addLeadForm.role} onChange={(event) => setAddLeadForm((current) => ({ ...current, role: event.target.value }))} className="w-full rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-primary-500" />
+            </label>
+            <label className="text-sm text-slate-600">
+              <span className="mb-1 block font-medium">Téléphone</span>
+              <input value={addLeadForm.telephone} onChange={(event) => setAddLeadForm((current) => ({ ...current, telephone: event.target.value }))} className="w-full rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-primary-500" />
+            </label>
+            <label className="text-sm text-slate-600 md:col-span-2">
+              <span className="mb-1 block font-medium">Statut</span>
+              <select value={addLeadForm.status} onChange={(event) => setAddLeadForm((current) => ({ ...current, status: event.target.value }))} className="w-full rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-primary-500">
+                <option value="NOUVEAU">Nouveau</option>
+                <option value="A_RELANCER">À relancer</option>
+                <option value="CONTACTE">Contacté</option>
+                <option value="CLIENT">Client</option>
+              </select>
+            </label>
+            <label className="text-sm text-slate-600 md:col-span-2">
+              <span className="mb-1 block font-medium">Note</span>
+              <textarea rows={3} value={addLeadForm.note} onChange={(event) => setAddLeadForm((current) => ({ ...current, note: event.target.value }))} className="w-full rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-primary-500" />
+            </label>
 
-      {successMessage && (
-        <section className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-          {successMessage}
-        </section>
-      )}
+            {addLeadError ? <p className="md:col-span-2 text-sm text-rose-600">{addLeadError}</p> : null}
+
+            <div className="md:col-span-2 flex flex-wrap items-center gap-3">
+              <button type="submit" disabled={isAddingLead} className="rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary-700 disabled:opacity-60">
+                {isAddingLead ? 'Ajout en cours…' : 'Créer le lead'}
+              </button>
+              <button type="button" onClick={() => setIsAddLeadOpen(false)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50">
+                Annuler
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+      <div className={`grid h-full min-h-0 w-full ${isPanelOpen && selectedLead ? 'xl:grid-cols-[minmax(0,1.65fr)_minmax(380px,1fr)]' : 'grid-cols-1'}`}>
+        <div className="min-h-0 min-w-0 p-4 xl:p-5">
+          <LeadsTable
+            leads={visibleLeads}
+            selectedLeadId={selectedLeadId}
+            onSelectLead={handleSelectLead}
+            onOpenAddLead={handleOpenAddLead}
+            onOpenMenu={handleOpenMenu}
+            onUpdateLead={handleUpdateLead}
+            search={search}
+            onSearchChange={setSearch}
+            statusFilter={statusFilter}
+            onStatusFilterChange={(value) => setStatusFilter(value as LeadStatusFilter)}
+            sourceFilter={sourceFilter}
+            onSourceFilterChange={setSourceFilter}
+            isLoading={isLoading}
+            pageLabel={leads.length ? `${(pageIndex - 1) * leadsPerPage + 1}–${Math.min(pageIndex * leadsPerPage, leads.length)} sur ${leads.length} leads` : '0 lead'}
+            onPrevPage={() => setPageIndex((value) => Math.max(1, value - 1))}
+            onNextPage={() => setPageIndex((value) => Math.min(pageCount, value + 1))}
+          />
+        </div>
+        <LeadDetailsPanel
+          lead={selectedLead}
+          isOpen={isPanelOpen}
+          activeTab={activeTab}
+          onClose={() => setIsPanelOpen(false)}
+          onTabChange={setActiveTab}
+          onAddActivity={handleOpenActivity}
+          onEmailLead={handleEmailLead}
+          onViewPdf={handleViewPdf}
+        />
+      </div>
     </div>
   );
 }

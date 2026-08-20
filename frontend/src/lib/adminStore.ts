@@ -369,63 +369,80 @@ export async function sendAdminFollowUpEmail(payload: {
 }
 
 export async function getAdminStats(): Promise<AdminStats> {
-  await ensureLeadSubmissionsSchema();
+  try {
+    await ensureLeadSubmissionsSchema();
 
-  const [rows] = await mysqlPool.execute<
-    Array<
-      AdminCountRow & {
-        totalLeads: number;
-        leadsThisWeek: number;
-        leadsThisMonth: number;
-        contactedCount: number;
-        pdfSentCount: number;
-        pdfDownloadAttemptCount: number;
-        pdfDownloadAttemptTotal: number;
-        emailsSentCount: number;
-      }
-    >
-  >(
-    `
-      SELECT
-        COUNT(*) AS totalLeads,
-        SUM(CASE WHEN submitted_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) THEN 1 ELSE 0 END) AS leadsThisWeek,
-        SUM(CASE WHEN submitted_at >= DATE_SUB(NOW(), INTERVAL 1 MONTH) THEN 1 ELSE 0 END) AS leadsThisMonth,
-        SUM(CASE WHEN contacted = 1 THEN 1 ELSE 0 END) AS contactedCount,
-        SUM(CASE WHEN pdf_sent = 1 THEN 1 ELSE 0 END) AS pdfSentCount,
-        SUM(CASE WHEN pdf_download_count > 0 THEN 1 ELSE 0 END) AS pdfDownloadAttemptCount,
-        COALESCE(SUM(pdf_download_count), 0) AS pdfDownloadAttemptTotal,
-        SUM(CASE WHEN email_count > 0 THEN email_count ELSE 0 END) AS emailsSentCount
-      FROM lead_submissions
-    `
-  );
+    const [rows] = await mysqlPool.execute<
+      Array<
+        AdminCountRow & {
+          totalLeads: number;
+          leadsThisWeek: number;
+          leadsThisMonth: number;
+          contactedCount: number;
+          pdfSentCount: number;
+          pdfDownloadAttemptCount: number;
+          pdfDownloadAttemptTotal: number;
+          emailsSentCount: number;
+        }
+      >
+    >(
+      `
+        SELECT
+          COUNT(*) AS totalLeads,
+          SUM(CASE WHEN submitted_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) THEN 1 ELSE 0 END) AS leadsThisWeek,
+          SUM(CASE WHEN submitted_at >= DATE_SUB(NOW(), INTERVAL 1 MONTH) THEN 1 ELSE 0 END) AS leadsThisMonth,
+          SUM(CASE WHEN contacted = 1 THEN 1 ELSE 0 END) AS contactedCount,
+          SUM(CASE WHEN pdf_sent = 1 THEN 1 ELSE 0 END) AS pdfSentCount,
+          SUM(CASE WHEN pdf_download_count > 0 THEN 1 ELSE 0 END) AS pdfDownloadAttemptCount,
+          COALESCE(SUM(pdf_download_count), 0) AS pdfDownloadAttemptTotal,
+          SUM(CASE WHEN email_count > 0 THEN email_count ELSE 0 END) AS emailsSentCount
+        FROM lead_submissions
+      `
+    );
 
-  const stats = rows[0] || {
-    totalLeads: 0,
-    leadsThisWeek: 0,
-    leadsThisMonth: 0,
-    contactedCount: 0,
-    pdfSentCount: 0,
-    pdfDownloadAttemptCount: 0,
-    pdfDownloadAttemptTotal: 0,
-    emailsSentCount: 0,
-  };
+    const stats = rows[0] || {
+      totalLeads: 0,
+      leadsThisWeek: 0,
+      leadsThisMonth: 0,
+      contactedCount: 0,
+      pdfSentCount: 0,
+      pdfDownloadAttemptCount: 0,
+      pdfDownloadAttemptTotal: 0,
+      emailsSentCount: 0,
+    };
 
-  return {
-    totalLeads: Number(stats.totalLeads || 0),
-    leadsThisWeek: Number(stats.leadsThisWeek || 0),
-    leadsThisMonth: Number(stats.leadsThisMonth || 0),
-    contactedCount: Number(stats.contactedCount || 0),
-    pdfSentCount: Number(stats.pdfSentCount || 0),
-    pdfDownloadAttemptCount: Number(stats.pdfDownloadAttemptCount || 0),
-    pdfDownloadAttemptTotal: Number(stats.pdfDownloadAttemptTotal || 0),
-    simulationsThisWeek: Number(stats.leadsThisWeek || 0),
-    visitsThisWeek: Number(stats.leadsThisWeek || 0),
-    conversionRate:
-      Number(stats.leadsThisWeek || 0) > 0
-        ? Math.round((Number(stats.contactedCount || 0) / Number(stats.leadsThisWeek || 0)) * 100)
-        : 0,
-    emailsSentCount: Number(stats.emailsSentCount || 0),
-  };
+    return {
+      totalLeads: Number(stats.totalLeads || 0),
+      leadsThisWeek: Number(stats.leadsThisWeek || 0),
+      leadsThisMonth: Number(stats.leadsThisMonth || 0),
+      contactedCount: Number(stats.contactedCount || 0),
+      pdfSentCount: Number(stats.pdfSentCount || 0),
+      pdfDownloadAttemptCount: Number(stats.pdfDownloadAttemptCount || 0),
+      pdfDownloadAttemptTotal: Number(stats.pdfDownloadAttemptTotal || 0),
+      simulationsThisWeek: Number(stats.leadsThisWeek || 0),
+      visitsThisWeek: Number(stats.leadsThisWeek || 0),
+      conversionRate:
+        Number(stats.leadsThisWeek || 0) > 0
+          ? Math.round((Number(stats.contactedCount || 0) / Number(stats.leadsThisWeek || 0)) * 100)
+          : 0,
+      emailsSentCount: Number(stats.emailsSentCount || 0),
+    };
+  } catch (error) {
+    console.error('getAdminStats error', error);
+    return {
+      totalLeads: 0,
+      leadsThisWeek: 0,
+      leadsThisMonth: 0,
+      contactedCount: 0,
+      pdfSentCount: 0,
+      pdfDownloadAttemptCount: 0,
+      pdfDownloadAttemptTotal: 0,
+      simulationsThisWeek: 0,
+      visitsThisWeek: 0,
+      conversionRate: 0,
+      emailsSentCount: 0,
+    };
+  }
 }
 
 export async function exportAdminLeadsCsv(filter: AdminLeadFilter): Promise<string> {

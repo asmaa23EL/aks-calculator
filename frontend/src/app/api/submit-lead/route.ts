@@ -14,14 +14,23 @@ function getBackendApiBaseUrl(): string {
 
 export async function POST(request: Request) {
   try {
-    const payload = await request.json().catch(() => null);
+    const bodyText = await request.text();
+    let payload: unknown = null;
+    if (bodyText) {
+      try {
+        payload = JSON.parse(bodyText);
+      } catch {
+        payload = null;
+      }
+    }
     const backendBaseUrl = getBackendApiBaseUrl();
     const response = await fetch(`${backendBaseUrl}/api/leads`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Accept': 'application/json',
       },
-      body: JSON.stringify(payload),
+      body: bodyText,
     });
 
     const responseText = await response.text();

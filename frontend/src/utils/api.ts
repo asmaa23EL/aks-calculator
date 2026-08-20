@@ -1,4 +1,10 @@
 export function getApiBaseUrl(): string {
+  // Browser requests go through the Next.js /api proxy. This avoids exposing an
+  // internal backend hostname to visitors and removes cross-origin failures.
+  if (typeof window !== 'undefined') {
+    return '';
+  }
+
   const fromEnv = [
     process.env.INTERNAL_BACKEND_API_URL,
     process.env.BACKEND_API_URL,
@@ -9,26 +15,16 @@ export function getApiBaseUrl(): string {
     return fromEnv.replace(/\/$/, '');
   }
 
-  if (typeof window !== 'undefined') {
-    const { protocol, hostname } = window.location;
-    if (hostname === 'localhost' || hostname === '127.0.0.1') {
-      return `${protocol}//${hostname}:4001`;
-    }
-  }
-
-  return 'http://localhost:4001';
+  return '';
 }
 
 export function buildApiUrl(path: string): string {
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
   const baseUrl = getApiBaseUrl();
 
-  if (typeof window !== 'undefined') {
-    if (baseUrl) {
-      return `${baseUrl}${normalizedPath}`;
-    }
-    return normalizedPath;
+  if (baseUrl) {
+    return `${baseUrl}${normalizedPath}`;
   }
 
-  return baseUrl ? `${baseUrl}${normalizedPath}` : `http://localhost:3000${normalizedPath}`;
+  return normalizedPath;
 }

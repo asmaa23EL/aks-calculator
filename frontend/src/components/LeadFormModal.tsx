@@ -48,8 +48,30 @@ function getInitialLeadData(): LeadFormData {
   }
 }
 
-function downloadPdfFromBase64(pdfBase64: string, filename: string) {
-  const binary = atob(pdfBase64);
+function openPdfUrl(url: string, filename: string, pendingPopup?: Window | null) {
+  const popup = pendingPopup || window.open('', '_blank', 'noopener,noreferrer');
+
+  if (popup) {
+    popup.location.href = url;
+    return;
+  }
+
+  try {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.target = '_blank';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  } catch {
+    window.location.assign(url);
+  }
+}
+
+function downloadPdfFromBase64(pdfBase64: string, filename: string, pendingPopup?: Window | null) {
+  const normalizedBase64 = pdfBase64.replace(/\s/g, '');
+  const binary = atob(normalizedBase64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i += 1) {
     bytes[i] = binary.charCodeAt(i);
@@ -57,21 +79,18 @@ function downloadPdfFromBase64(pdfBase64: string, filename: string) {
 
   const blob = new Blob([bytes], { type: 'application/pdf' });
   const url = window.URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  link.target = '_blank';
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  // Ouvre aussi le PDF dans un nouvel onglet pour contourner les blocages de telechargement auto.
-  window.open(url, '_blank', 'noopener,noreferrer');
+  openPdfUrl(url, filename, pendingPopup);
   setTimeout(() => {
     window.URL.revokeObjectURL(url);
   }, 10000);
 }
 
-async function downloadPdfFromApi(lead: LeadFormData, results: CalculationResults, fallbackFilename: string) {
+async function downloadPdfFromApi(
+  lead: LeadFormData,
+  results: CalculationResults,
+  fallbackFilename: string,
+  pendingPopup?: Window | null,
+) {
   const response = await fetch(buildApiUrl('/api/generate-pdf'), {
     method: 'POST',
     headers: {
@@ -101,14 +120,7 @@ async function downloadPdfFromApi(lead: LeadFormData, results: CalculationResult
   const filename = matched?.[1] || fallbackFilename;
 
   const url = window.URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  link.target = '_blank';
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  window.open(url, '_blank', 'noopener,noreferrer');
+  openPdfUrl(url, filename, pendingPopup);
   setTimeout(() => {
     window.URL.revokeObjectURL(url);
   }, 10000);
@@ -136,6 +148,7 @@ export default function LeadFormModal({
   const [pdfFilename, setPdfFilename] = useState(`rapport-roi-aks-${Date.now()}.pdf`);
   const [isRetryDownloading, setIsRetryDownloading] = useState(false);
   const [pdfDataUrl, setPdfDataUrl] = useState('');
+  const [submitError, setSubmitError] = useState('');
 
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
@@ -163,6 +176,9 @@ export default function LeadFormModal({
     if (!validateForm()) return;
 
     setIsSubmitting(true);
+    setSubmitError('');
+    // Open synchronously from the user's click so popup blockers allow it.
+    const pendingPdfPopup = mode === 'lead-and-download' ? window.open('', '_blank') : null;
 
     try {
       const requestBody = {
@@ -186,43 +202,21 @@ export default function LeadFormModal({
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(requestBody),
-      }).catch(() => null);
+      });
 
-      if (externalResponse?.ok) {
-        payload = (await externalResponse.json().catch(() => null)) as
-          | {
-              emailSent?: boolean;
-              emailError?: string | null;
-              pdfBase64?: string;
-              pdfFilename?: string;
-            }
-          | null;
-      } else {
-        const fallbackResponse = await fetch('/api/submit-lead', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(requestBody),
-        });
-
-        if (!fallbackResponse.ok) {
-          const externalError = externalResponse
-            ? await parseErrorMessage(externalResponse, 'Erreur lors de l\'envoi')
-            : 'API principale indisponible';
-          const fallbackError = await parseErrorMessage(fallbackResponse, 'Erreur lors de l\'envoi local');
-          throw new Error(`${fallbackError} (${externalError})`);
-        }
-
-        payload = (await fallbackResponse.json().catch(() => null)) as
-          | {
-              emailSent?: boolean;
-              emailError?: string | null;
-              pdfBase64?: string;
-              pdfFilename?: string;
-            }
-          | null;
+      if (!externalResponse.ok) {
+        const externalError = await parseErrorMessage(externalResponse, 'Erreur lors de l\'envoi');
+        throw new Error(externalError);
       }
+
+      payload = (await externalResponse.json().catch(() => null)) as
+        | {
+            emailSent?: boolean;
+            emailError?: string | null;
+            pdfBase64?: string;
+            pdfFilename?: string;
+          }
+        | null;
 
       {
 
@@ -232,9 +226,9 @@ export default function LeadFormModal({
 
           if (payload?.pdfBase64) {
             setPdfDataUrl(`data:application/pdf;base64,${payload.pdfBase64}`);
-            downloadPdfFromBase64(payload.pdfBase64, fallbackFilename);
+            downloadPdfFromBase64(payload.pdfBase64, fallbackFilename, pendingPdfPopup);
           } else {
-            await downloadPdfFromApi(formData, results, fallbackFilename);
+            await downloadPdfFromApi(formData, results, fallbackFilename, pendingPdfPopup);
           }
         }
 
@@ -258,10 +252,12 @@ export default function LeadFormModal({
         }
       }
     } catch (error) {
+      pendingPdfPopup?.close();
       console.error('Erreur:', error);
       const message = error instanceof Error && error.message
         ? error.message
         : 'Une erreur est survenue. Veuillez reessayer.';
+      setSubmitError(message);
       alert(message);
     } finally {
       setIsSubmitting(false);
@@ -270,9 +266,11 @@ export default function LeadFormModal({
 
   const retryDownload = async () => {
     setIsRetryDownloading(true);
+    const pendingPdfPopup = window.open('', '_blank');
     try {
-      await downloadPdfFromApi(formData, results, pdfFilename);
+      await downloadPdfFromApi(formData, results, pdfFilename, pendingPdfPopup);
     } catch (error) {
+      pendingPdfPopup?.close();
       console.error('Erreur telechargement manuel:', error);
       alert('Le telechargement du PDF a echoue. Veuillez reessayer.');
     } finally {
@@ -311,29 +309,30 @@ export default function LeadFormModal({
           <h3 className="text-2xl font-bold text-gray-900 mb-2">Merci !</h3>
           <p className="text-gray-600">
             {mode === 'lead-and-download'
-              ? 'Votre PDF est en cours de telechargement et votre rapport est envoye par email.'
+              ? 'Votre rapport est prêt. Vous pouvez le consulter immédiatement.'
               : 'Votre rapport détaillé vous sera envoyé par email dans quelques instants.'}
           </p>
           {mode === 'lead-and-download' && (
             <>
-              <button
-                type="button"
-                onClick={retryDownload}
-                disabled={isRetryDownloading}
-                className="mt-6 w-full btn-primary disabled:opacity-50"
-              >
-                {isRetryDownloading ? 'Telechargement en cours...' : 'Telecharger le PDF maintenant'}
-              </button>
-              {pdfDataUrl && (
+              {pdfDataUrl ? (
                 <a
                   href={pdfDataUrl}
                   download={pdfFilename}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="mt-3 block w-full btn-secondary text-center"
+                  className="mt-6 block w-full btn-primary text-center"
                 >
-                  Ouvrir / telecharger le PDF
+                  Ouvrir le rapport
                 </a>
+              ) : (
+                <button
+                  type="button"
+                  onClick={retryDownload}
+                  disabled={isRetryDownloading}
+                  className="mt-6 w-full btn-primary disabled:opacity-50"
+                >
+                  {isRetryDownloading ? 'Préparation en cours...' : 'Ouvrir le rapport'}
+                </button>
               )}
               <button
                 type="button"
@@ -501,6 +500,13 @@ export default function LeadFormModal({
             )}
           </div>
 
+          {submitError && (
+            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              <div className="font-semibold">Erreur de communication</div>
+              <div className="mt-1 break-words">{submitError}</div>
+            </div>
+          )}
+
           <div className="flex gap-4">
             <button
               type="button"
@@ -518,7 +524,7 @@ export default function LeadFormModal({
               {isSubmitting
                 ? 'Envoi en cours...'
                 : mode === 'lead-and-download'
-                  ? 'Confirmer et telecharger le PDF'
+                  ? 'Valider et continuer'
                   : 'Recevoir le rapport'}
             </button>
           </div>

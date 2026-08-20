@@ -8,7 +8,7 @@ const backendBaseUrl = [
   process.env.INTERNAL_BACKEND_API_URL,
   process.env.BACKEND_API_URL,
   process.env.NEXT_PUBLIC_API_BASE_URL,
-].find((value) => value?.trim())?.trim() || 'http://localhost:4001';
+].find((value) => value?.trim())?.trim() || 'http://localhost:3001';
 
 function getProxyUrl(request: NextRequest, pathSegments: string[]) {
   const pathName = pathSegments.length > 0 ? `/api/${pathSegments.join('/')}` : '/api';

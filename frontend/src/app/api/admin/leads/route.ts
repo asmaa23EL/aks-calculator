@@ -1,21 +1,64 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminSessionCookieName, isValidAdminSessionToken, listAdminLeads } from '@/lib/adminStore';
 
 export const runtime = 'nodejs';
 
-function requireAdmin(request: NextRequest) {
-  const token = request.cookies.get(getAdminSessionCookieName())?.value;
-  return !token || isValidAdminSessionToken(token);
+function resolveBackendBaseUrl() {
+  const candidates = [
+    process.env.INTERNAL_BACKEND_API_URL,
+    process.env.BACKEND_API_URL,
+    process.env.NEXT_PUBLIC_API_BASE_URL,
+    'http://backend:3001',
+    'http://localhost:4001',
+  ];
+
+  return candidates.find((value) => value?.trim())?.trim() || 'http://backend:3001';
+}
+
+async function proxyToBackend(request: NextRequest) {
+  const backendBaseUrl = resolveBackendBaseUrl();
+  const targetUrl = new URL(request.nextUrl.pathname + request.nextUrl.search, backendBaseUrl);
+  const headers = new Headers(request.headers);
+  headers.delete('host');
+
+  const cookieHeader = request.headers.get('cookie');
+  if (cookieHeader) {
+    headers.set('cookie', cookieHeader);
+  }
+
+  const upstreamResponse = await fetch(targetUrl, {
+    method: request.method,
+    headers,
+    body: request.method === 'GET' || request.method === 'HEAD' ? undefined : await request.text(),
+    redirect: 'manual',
+  });
+
+  const responseBody = await upstreamResponse.text();
+  const response = new NextResponse(responseBody, {
+    status: upstreamResponse.status,
+    headers: {
+      'content-type': upstreamResponse.headers.get('content-type') || 'application/json',
+    },
+  });
+
+  const setCookieHeader = upstreamResponse.headers.get('set-cookie');
+  if (setCookieHeader) {
+    const cookieValues = Array.isArray(setCookieHeader) ? setCookieHeader : [setCookieHeader];
+    for (const cookieValue of cookieValues) {
+      response.headers.append('set-cookie', cookieValue);
+    }
+  }
+
+  return response;
 }
 
 export async function GET(request: NextRequest) {
-  if (!requireAdmin(request)) {
-    return NextResponse.json({ error: 'Non authentifie' }, { status: 401 });
-  }
+  return proxyToBackend(request);
+}
 
-  const search = request.nextUrl.searchParams.get('search') || '';
-  const status = (request.nextUrl.searchParams.get('status') || 'all') as 'all' | 'new' | 'pdf_sent' | 'contacted';
+export async function POST(request: NextRequest) {
+  return proxyToBackend(request);
+}
 
-  const leads = await listAdminLeads({ search, status });
-  return NextResponse.json({ leads });
+export async function PATCH(request: NextRequest) {
+  return proxyToBackend(request);
 }

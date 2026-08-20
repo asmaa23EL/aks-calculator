@@ -11,32 +11,24 @@ export default function SiteHeader() {
   }
 
   return (
-    <header className="bg-white shadow-sm border-b border-gray-200">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
-        <div className="flex items-center justify-between">
-          <a href="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
-            <img
-              src="/logo.png"
-              alt="CloudDev Fusion Logo"
-              className="h-10 w-auto"
-            />
-            <div>
-              <h1 className="text-xl font-bold text-gray-900">
-                CloudDev Fusion
-              </h1>
-              <p className="text-xs text-gray-500">Excellence Azure & Cloud</p>
-            </div>
-          </a>
+    <header className="border-b border-slate-200 bg-[linear-gradient(135deg,_#001F4D_0%,_#002B63_100%)] text-white shadow-sm">
+      <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-5 sm:px-6 lg:px-8">
+        <a href="/" className="flex items-center gap-3 transition-opacity hover:opacity-90">
+          <img src="/logo.png" alt="CloudDev Fusion" className="h-11 w-20 object-contain" />
+          <div>
+            <h1 className="text-lg font-semibold tracking-wide text-white">CloudDev Fusion</h1>
+            <p className="text-xs text-blue-100">Excellence Azure & Cloud</p>
+          </div>
+        </a>
 
-          <a
-            href="https://www.clouddevfusion.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-blue-600 hover:text-blue-800 text-sm font-medium transition-colors"
-          >
-            www.clouddevfusion.com
-          </a>
-        </div>
+        <a
+          href="https://www.clouddevfusion.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-sm font-medium text-blue-100 transition-colors hover:text-white"
+        >
+          www.clouddevfusion.com
+        </a>
       </div>
     </header>
   );
